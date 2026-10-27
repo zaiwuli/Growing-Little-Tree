@@ -4,6 +4,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypt
 import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { approveOverdue } from './automation.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 mkdirSync(path.join(root, 'data'), { recursive: true });
@@ -44,24 +45,60 @@ function view(s, child) {
   start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
   const week = start.toISOString().slice(0, 10);
   const ledger = s.ledger.filter(l => l.child === child);
-  return { family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child && !a.deletedAt), rewards: s.rewards.filter(r => !r.deletedAt), redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
+  return { family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child && !a.deletedAt), wishes: (s.wishes || []).filter(w => w.child === child), rewards: s.rewards.filter(r => !r.deletedAt && (!r.child || r.child === child)), redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
 }
 function mutate(s, action, b, parent) {
   const c = s.children.find(c => c.id === b.child) || fail('孩子不存在');
   const requireParent = () => { if (!parent) fail('请先解锁家长模式', 403); };
-  if (action === 'complete') {
+  s.wishes ||= [];
+  if (action === 'auto-approve') {
+    requireParent();
+    if (typeof b.enabled !== 'boolean') fail('开关值无效');
+    s.settings ||= {};
+    s.settings.autoApprove = { enabled: b.enabled, fromDate: date(), updatedAt: new Date().toISOString() };
+  } else if (action === 'deduct') {
+    requireParent();
+    const points = number(b.points, 1, 1000);
+    if (balance(s, c.id) - frozen(s, c.id) < points) fail('扣分不能超过当前可用积分');
+    entry(s, c.id, -points, '家长扣分：' + text(b.reason, 300), 'deduct');
+  } else if (action === 'wish' || action === 'edit-wish') {
+    const values = { title: text(b.title), icon: text(b.icon || '🎁', 8), note: typeof b.note === 'string' ? b.note.trim().slice(0, 300) : '' };
+    if (action === 'wish') s.wishes.push({ id: uid(), child: c.id, ...values, status: 'pending', at: new Date().toISOString() });
+    else { const wish = s.wishes.find(w => w.id === b.id && w.child === c.id) || fail('心愿不存在'); if (wish.status !== 'pending') fail('只能修改待审批的心愿'); Object.assign(wish, values); }
+  } else if (action === 'withdraw-wish') {
+    const wish = s.wishes.find(w => w.id === b.id && w.child === c.id) || fail('心愿不存在');
+    if (wish.status === 'pending') wish.status = 'withdrawn';
+  } else if (action === 'review-wish') {
+    requireParent();
+    const wish = s.wishes.find(w => w.id === b.id && w.child === c.id) || fail('心愿不存在');
+    if (wish.status !== 'pending') fail('此心愿已处理');
+    if (b.operation === 'approve') {
+      const reward = { id: uid(), child: c.id, title: text(b.title || wish.title), icon: wish.icon, cost: number(b.cost, 1, 100000), note: wish.note };
+      s.rewards.push(reward); wish.reward = reward.id; wish.status = 'approved'; wish.cost = reward.cost;
+    } else if (b.operation === 'reject') { wish.reason = text(b.reason, 300); wish.status = 'rejected'; }
+    else fail('审批操作无效');
+    wish.reviewedAt = new Date().toISOString();
+  } else if (action === 'complete') {
     const t = s.tasks.find(t => t.id === b.id && t.child === c.id) || fail('活动不存在');
     if (s.activities.some(a => a.id === t.activity && a.deletedAt)) fail('此活动已删除');
-    if (t.status === 'todo') { t.status = t.review && !parent ? 'pending' : 'done'; if (t.status === 'done') entry(s, c.id, t.points, t.title, 'task', t.id); }
+    if (t.day !== date()) fail('只能提交今天的任务');
+    if (t.status === 'todo') { t.status = t.review && !parent ? 'pending' : 'done'; if (t.status === 'done') { entry(s, c.id, t.points, t.title, 'task', t.id); t.reviewedBy = 'parent'; t.reviewedAt = new Date().toISOString(); } s.taskEvents ||= []; s.taskEvents.push({ task: t.id, child: c.id, day: t.day, action: t.status === 'done' ? 'complete' : 'submit', actor: parent ? 'parent' : 'child', at: new Date().toISOString() }); }
   } else if (action === 'task') {
     const t = s.tasks.find(t => t.id === b.id && t.child === c.id) || fail('活动不存在');
-    if (b.operation === 'withdraw') { if (t.status === 'pending') t.status = 'todo'; return; }
+    if (!['withdraw', 'approve', 'reject', 'undo'].includes(b.operation)) fail('审核操作无效');
+    if (t.day !== date()) requireParent();
+    const oldStatus = t.status;
+    if (b.operation === 'withdraw') { if (t.status === 'pending') { t.status = 'todo'; s.taskEvents ||= []; s.taskEvents.push({ task:t.id, child:c.id, day:t.day, action:'withdraw', actor:parent ? 'parent' : 'child', at:new Date().toISOString() }); } return; }
     if (b.operation !== 'undo' || t.review) requireParent();
     if (b.operation === 'approve' && t.status === 'pending') { t.status = 'done'; entry(s, c.id, t.points, t.title, 'task', t.id); }
     else if (b.operation === 'reject' && t.status === 'pending') t.status = 'todo';
     else if (b.operation === 'undo' && t.status === 'done') {
       for (const r of s.redemptions.filter(r => r.child === c.id && r.status === 'pending')) r.status = 'cancelled';
       t.status = 'todo'; entry(s, c.id, -t.points, '撤销：' + t.title, 'reverse', t.id);
+    }
+    if (oldStatus !== t.status) {
+      t.reviewedBy = 'parent'; t.reviewedAt = new Date().toISOString();
+      s.taskEvents ||= []; s.taskEvents.push({ task:t.id, child:c.id, day:t.day, action:b.operation, actor:'parent', at:t.reviewedAt });
     }
   } else if (action === 'delete-activity') {
     requireParent();
@@ -93,9 +130,9 @@ function mutate(s, action, b, parent) {
   } else if (action === 'goal') { requireParent(); c.goal = number(b.goal, 1, 100000); }
   else if (action === 'child') { requireParent(); s.children.push({ id: uid(), name: text(b.name, 20), goal: 100 }); }
   else if (action === 'bonus') { requireParent(); entry(s, c.id, number(b.points, 1), text(b.reason), 'bonus'); }
-  else if (action === 'reward') { requireParent(); s.rewards.push({ id: uid(), title: text(b.title), icon: text(b.icon || '🎁', 8), cost: number(b.cost, 1, 100000) }); }
+  else if (action === 'reward') { requireParent(); s.rewards.push({ id: uid(), child: c.id, title: text(b.title), icon: text(b.icon || '🎁', 8), cost: number(b.cost, 1, 100000) }); }
   else if (action === 'redeem') {
-    const r = s.rewards.find(r => r.id === b.id && !r.deletedAt) || fail('奖励不存在或已删除');
+    const r = s.rewards.find(r => r.id === b.id && !r.deletedAt && (!r.child || r.child === c.id)) || fail('奖励不存在或已删除');
     if (balance(s, c.id) - frozen(s, c.id) < r.cost) fail('可用积分还不够，再加油！');
     s.redemptions.push({ id: uid(), child: c.id, title: r.title, icon: r.icon, cost: r.cost, status: 'pending', at: new Date().toISOString() });
   } else if (action === 'redemption') {
@@ -132,6 +169,13 @@ const server = http.createServer(async (req, res) => {
       return send(200, result);
     }
     if (req.method === 'GET') {
+      if (url.pathname === '/api/history') {
+        if (!parent) fail('请先解锁家长模式', 403);
+        const day = url.searchParams.get('day'), child = url.searchParams.get('child');
+        if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(day)) || day > date()) fail('请选择有效的历史日期');
+        if (!s?.children.some(c => c.id === child)) fail('孩子不存在');
+        return send(200, { day, tasks:s.tasks.filter(t => t.child === child && t.day === day), events:(s.taskEvents || []).filter(e => e.child === child && e.day === day), ledger:s.ledger.filter(l => l.child === child && l.day === day) });
+      }
       if (url.pathname === '/api/ai-tokens') { if (!parent) fail('请先解锁家长模式', 403); return send(200, { tokens: (s?.aiTokens || []).map(tokenInfo) }); }
       if (url.pathname === '/api/status') return send(200, { initialized: !!s, parent: !!parent });
       if (!s) return send(200, { initialized: false });
@@ -139,7 +183,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname !== '/api/state') fail('接口不存在', 404);
       const child = url.searchParams.get('child') || s.children[0].id;
       if (!s.children.some(c => c.id === child)) fail('孩子不存在');
-      const result = view(s, child); save(s); return send(200, { ...result, parent: !!parent });
+      const result = view(s, child); save(s); return send(200, { ...result, parent: !!parent, settings: parent ? s.settings || {} : undefined });
     }
     if (req.method !== 'POST') fail('不支持的请求方式', 405);
     if (req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) fail('请求来源不匹配', 403);
@@ -152,7 +196,7 @@ const server = http.createServer(async (req, res) => {
       const credential = authenticateAI(s, req);
       if (credential.scope !== 'manage') fail('此令牌只有读取权限', 403);
       const aiAction = url.pathname.slice('/api/ai/v1/'.length);
-      if (!['activity', 'edit-activity', 'delete-activity', 'delete-reward', 'toggle', 'complete', 'task', 'goal', 'bonus', 'reward', 'redeem', 'redemption'].includes(aiAction)) fail('接口不存在', 404);
+      if (!['wish', 'edit-wish', 'withdraw-wish', 'review-wish', 'activity', 'edit-activity', 'delete-activity', 'delete-reward', 'toggle', 'complete', 'task', 'goal', 'bonus', 'reward', 'redeem', 'redemption'].includes(aiAction)) fail('接口不存在', 404);
       const requestId = text(req.headers['idempotency-key'], 100);
       s.aiRequests ||= [];
       const fingerprint = digest(JSON.stringify([aiAction, b]));
@@ -192,4 +236,10 @@ const server = http.createServer(async (req, res) => {
   } catch (error) { console.error(error.message); send(error.status || 500, { error: error.status ? error.message : '服务暂时出错，请重试' }); }
 });
 const attempts = new Map();
+function runAutoApproval() {
+  try { const state = load(); if (state && approveOverdue(state, date())) save(state); }
+  catch (error) { console.error('自动审核失败：', error.message); }
+}
+runAutoApproval();
+setInterval(runAutoApproval, 1000).unref();
 server.listen(Number(process.env.PORT || 3000), process.env.HOST || '127.0.0.1', () => console.log('成长小树 http://' + (process.env.HOST || '127.0.0.1') + ':' + (process.env.PORT || 3000)));

@@ -129,6 +129,8 @@ function mutate(s, action, b, parent) {
     requireParent(); const a = s.activities.find(a => a.id === b.id && a.child === c.id && !a.deletedAt) || fail('活动不存在'); a.active = !a.active;
   } else if (action === 'goal') { requireParent(); c.goal = number(b.goal, 1, 100000); }
   else if (action === 'child') { requireParent(); s.children.push({ id: uid(), name: text(b.name, 20), goal: 100 }); }
+  else if (action === 'edit-child') { requireParent(); c.name = text(b.name, 20); }
+  else if (action === 'edit-family') { requireParent(); s.family = text(b.family); }
   else if (action === 'bonus') { requireParent(); entry(s, c.id, number(b.points, 1), text(b.reason), 'bonus'); }
   else if (action === 'reward') { requireParent(); s.rewards.push({ id: uid(), child: c.id, title: text(b.title), icon: text(b.icon || '🎁', 8), cost: number(b.cost, 1, 100000) }); }
   else if (action === 'redeem') {
@@ -148,7 +150,18 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     if (!url.pathname.startsWith('/api/')) {
+      if (url.pathname === '/manifest.webmanifest' && url.searchParams.has('slot')) {
+        const slot = url.searchParams.get('slot');
+        const current = load();
+        if (!/^[1-9]\d*$/.test(slot) || !current?.children[Number(slot) - 1]) fail('孩子入口不存在', 404);
+        const manifest = JSON.parse(readFileSync(path.join(root, 'public', 'manifest.webmanifest'), 'utf8'));
+        manifest.id = '/' + slot; manifest.start_url = '/' + slot;
+        manifest.name = '成长小树 · ' + current.children[Number(slot) - 1].name;
+        manifest.short_name = current.children[Number(slot) - 1].name + '的小树';
+        return send(200, manifest, { 'Content-Type': 'application/manifest+json' });
+      }
       const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/style.css': ['style.css', 'text/css; charset=utf-8'] };
+      if (/^\/[1-9]\d*$/.test(url.pathname)) files[url.pathname] = files['/'];
       files['/toothbrush.svg'] = ['toothbrush.svg', 'image/svg+xml'];
       for (const name of ['icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'manifest.webmanifest', 'sw.js']) files['/' + name] = [name, name.endsWith('.png') ? 'image/png' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.webmanifest') ? 'application/manifest+json' : 'text/javascript; charset=utf-8'];
       const file = files[url.pathname]; if (!file) return send(404, { error: '页面不存在' });
@@ -158,6 +171,11 @@ const server = http.createServer(async (req, res) => {
     const token = req.headers.cookie?.match(/(?:^|; )session=([a-f0-9]+)/)?.[1];
     const session = sessions.get(token);
     const parent = session && session > Date.now();
+    const keepAlive = parent && req.method === 'POST' && !['/api/logout', '/api/login'].includes(url.pathname);
+    if (keepAlive) {
+      sessions.set(token, Date.now() + 30 * 60000);
+      res.setHeader('Set-Cookie', `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=1800`);
+    }
     const aiRoute = url.pathname.startsWith('/api/ai/v1/');
     if (aiRoute && req.method === 'GET') {
       if (!s) fail('请先初始化', 401);
@@ -181,7 +199,9 @@ const server = http.createServer(async (req, res) => {
       if (!s) return send(200, { initialized: false });
       if (url.pathname === '/api/export') { if (!parent) fail('请先解锁家长模式', 403); const { password, salt, aiTokens, aiRequests, ...backup } = s; return send(200, backup, { 'Content-Disposition': 'attachment; filename="growth-export.json"' }); }
       if (url.pathname !== '/api/state') fail('接口不存在', 404);
-      const child = url.searchParams.get('child') || s.children[0].id;
+      const slot = url.searchParams.get('slot');
+      if (slot !== null && (!/^[1-9]\d*$/.test(slot) || !s.children[Number(slot) - 1])) fail('该孩子专属地址不存在', 404);
+      const child = slot !== null ? s.children[Number(slot) - 1].id : url.searchParams.get('child') || s.children[0].id;
       if (!s.children.some(c => c.id === child)) fail('孩子不存在');
       const result = view(s, child); save(s); return send(200, { ...result, parent: !!parent, settings: parent ? s.settings || {} : undefined });
     }
@@ -191,6 +211,7 @@ const server = http.createServer(async (req, res) => {
     let b; try { b = JSON.parse(raw || '{}'); } catch { fail('请求格式不正确'); }
     s = load();
     const action = url.pathname.slice(5);
+    if (action === 'parent-session') { if (!parent) fail('请先解锁家长模式', 403); return send(200, { ok: true }); }
     if (aiRoute) {
       if (!s) fail('请先初始化', 401);
       const credential = authenticateAI(s, req);

@@ -1,16 +1,33 @@
 const app = document.querySelector('#app');
 const modal = document.querySelector('#modal');
+let childSlot = location.pathname.match(/^\/([1-9]\d*)$/)?.[1] || '';
+if (childSlot) document.querySelector('link[rel="manifest"]').href = '/manifest.webmanifest?slot=' + childSlot;
 let state, page = 'today', child = localStorage.getItem('child') || '', busy = false, managementTab = 'review', historyDay = '', historyData = null;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const renderIcon = icon => String(icon).replaceAll('\uFE0F', '') === '🪥' ? '<img src="/toothbrush.svg" alt="牙刷" style="width:1.25em;height:1.25em;vertical-align:middle">' : esc(icon);
 const icons = { today: '◉', wishes: '✦', growth: '▥', profile: '☻' };
 const labels = { today: '今天', wishes: '心愿奖励', growth: '成长记录', profile: '我的' };
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove('show'), 3000); }
+let lastParentActivity = 0;
+async function renewParentSession() {
+  if (!state?.parent || page !== 'manage' || Date.now() - lastParentActivity < 60000) return;
+  lastParentActivity = Date.now();
+  try { await api('parent-session', {}); } catch (error) { toast(error.message); }
+}
+for (const event of ['pointerdown', 'keydown', 'scroll']) document.addEventListener(event, renewParentSession, { passive: true, capture: true });
 async function api(action, data) {
   const response = await fetch('/api/' + action, data ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ child, ...data }) } : {});
-  const result = await response.json(); if (!response.ok) throw Error(result.error); return result;
+  const result = await response.json();
+  if (!response.ok) {
+    if (response.status === 403 && result.error === '请先解锁家长模式' && state?.parent) {
+      state.parent = false; page = 'profile'; if (modal.open) modal.close(); render();
+      throw Error('家长登录已过期或服务已重启，请从“我的”重新进入家长控制');
+    }
+    throw Error(result.error);
+  }
+  return result;
 }
-async function refresh() { try { state = await api('state' + (child ? '?child=' + encodeURIComponent(child) : '')); if (state.initialized === false) return setup(); child = state.child; localStorage.setItem('child', child); render(); } catch (e) { if (child) { child = ''; return refresh(); } app.innerHTML = `<main class="onboarding"><h1>暂时无法加载</h1><p>${esc(e.message)}</p><button onclick="location.reload()">重新加载</button></main>`; } }
+async function refresh() { try { state = await api('state' + (childSlot ? '?slot=' + childSlot : child ? '?child=' + encodeURIComponent(child) : '')); if (state.initialized === false) return setup(); child = state.child; localStorage.setItem('child', child); render(); } catch (e) { if (child && !childSlot) { child = ''; return refresh(); } app.innerHTML = `<main class="onboarding"><h1>暂时无法加载</h1><p>${esc(e.message)}</p><button onclick="location.reload()">重新加载</button></main>`; } }
 function setup() {
   app.innerHTML = `<main class="onboarding"><div class="brandmark"><img src="/icon.svg" alt="成长小树"></div><p class="eyebrow">GROW A LITTLE, EVERY DAY</p><h1>让好习惯，<br>慢慢长成大树。</h1><p>欢迎来到成长小树。一起约定小目标，收获每天的小进步。</p><form id="setup"><label>家庭名称<input name="family" placeholder="例如：向日葵之家" required maxlength="80"></label><label>孩子昵称<input name="name" placeholder="怎么称呼小朋友？" required maxlength="20"></label><label>设置家长密码<input name="password" type="password" minlength="8" maxlength="128" placeholder="至少 8 位，用于管理和审核" required></label><button class="primary">种下我们的第一棵树 →</button></form><small>数据保存在本机 · 无需注册外部账号</small></main>`;
   document.querySelector('#setup').onsubmit = async e => { e.preventDefault(); try { await api('setup', Object.fromEntries(new FormData(e.target))); await api('login', { password: e.target.password.value }); await refresh(); } catch (err) { toast(err.message); } };
@@ -22,7 +39,7 @@ function render() {
   <section class="page-heading"><div><p class="eyebrow">${state.today.replaceAll('-', ' / ')} · 每天进步一点点</p><h1>${page === 'today' ? `你好，${esc(c.name)} <span class="wave">☀</span>` : page === 'manage' ? '家长管理' : labels[page]}</h1><p>${page === 'today' ? '今天的小小努力，会变成明天的大大惊喜。' : page === 'wishes' ? '把期待放在这里，一点一点靠近它。' : page === 'growth' ? '每一次认真完成，都值得被记住。' : '一起约定，让每天的计划刚刚好。'}</p></div>${page === 'today' ? `<div class="date-stamp">TODAY<strong>${Number(state.today.slice(-2))}</strong>成长第 ${new Set(state.ledger.map(l => l.day)).size || 1} 天</div>` : ''}</section>
   ${page === 'today' ? today(done) : page === 'wishes' ? wishes() : page === 'growth' ? growth() : page === 'manage' ? manage() : profile()}
   <footer>小树每天都在长大，你也是。 <span>GROWTH TREE / FAMILY EDITION</span></footer></main>`;
-  document.querySelector('#children').onchange = async e => { child = e.target.value; historyData = null; await refresh(); if(page === 'manage' && managementTab === 'history') await loadHistory(); };
+  document.querySelector('#children').onchange = async e => { child = e.target.value; if(childSlot) { childSlot = String(state.children.findIndex(c => c.id === child) + 1); history.replaceState(null, '', '/' + childSlot); } historyData = null; await refresh(); if(page === 'manage' && managementTab === 'history') await loadHistory(); };
 }
 function today(done) {
   const ratio = Math.min(100, Math.round(state.weekPoints / state.goal * 100));
@@ -30,7 +47,12 @@ function today(done) {
   <div class="section-title"><div><h2>今天的小任务 <span>${done}/${state.tasks.length}</span></h2><p>按照自己的节奏，一件一件完成吧</p></div></div>
   ${state.tasks.length ? ['早晨', '放学后', '晚上', '自由时间'].map(period => { const list = state.tasks.filter(t => t.period === period); return list.length ? `<section class="task-group"><h3>${{ 早晨: '☀', 放学后: '☁', 晚上: '☾', 自由时间: '✧' }[period]} ${period}</h3><div class="task-grid">${list.map(taskCard).join('')}</div></section>` : ''; }).join('') : `<div class="empty"><span>🌱</span><h3>从一个小习惯开始</h3><p>今天还没有安排，和家长一起约定一个小习惯吧。</p></div>`}`;
 }
-function taskCard(t) { return `<article class="task ${t.status}"><div class="task-icon">${renderIcon(t.icon)}</div><div class="task-copy"><h3>${esc(t.title)}</h3><p>${t.status === 'done' ? '已完成，做得很棒！' : t.status === 'pending' ? '等待家长确认' : t.review ? '完成后由家长确认' : '完成就能收获积分'}</p></div><span class="points">+${t.points}</span><button class="check" aria-label="${esc(t.title)}${t.status === 'todo' ? '，标记完成' : '，' + t.status}" data-action="complete" data-id="${t.id}" >${t.status === 'done' ? '✓' : t.status === 'pending' ? '◷' : ''}</button></article>`; }
+function taskCard(t) {
+ const names = {todo:'未完成',pending:'待确认',done:'已完成'};
+ const hint = t.status === 'todo' ? '点击标记完成' : t.status === 'pending' ? '点击撤回提交' : t.review && !state.parent ? '请家长修改' : '点击取消完成';
+ const check = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m5 12 4 4 10-10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+ return '<article class="task '+t.status+'"><div class="task-icon">'+renderIcon(t.icon)+'</div><div class="task-copy"><h3>'+esc(t.title)+'</h3><p>'+(t.status === 'done' ? '已确认，积分已到账' : t.status === 'pending' ? '已提交，等待家长确认' : t.review ? '完成后由家长确认' : '完成就能收获积分')+'</p></div><span class="points">+'+t.points+'</span><div class="task-state"><button class="check" aria-label="'+esc(t.title)+'，'+names[t.status]+'，'+hint+'" aria-pressed="'+(t.status !== 'todo')+'" data-action="complete" data-id="'+t.id+'">'+(t.status !== 'todo' ? check : '')+'</button><span class="state-caption">'+names[t.status]+'</span></div></article>';
+}
 function wishes() { return `<div class="balance-banner"><span>✷ 可用积分 <b>${state.balance - state.frozen}</b></span><small>兑换不会减少累计收获和本周进度</small></div><div class="section-title"><div><h2>我的小小心愿</h2><p>自己许愿，和家长一起约定需要的积分</p></div><button class="primary" data-action="wish">＋ 许个心愿</button></div>${wishList(false)}<div class="section-title"><h2>可以兑换的奖励</h2></div><div class="reward-grid">${!state.rewards.length ? '<div class="empty reward-empty"><span>🎁</span><h3>写下你的第一个心愿</h3><p>想去哪里，想做什么？让家长听听你的期待。</p></div>' : ''}${state.rewards.map(r => `<article class="reward"><div class="reward-icon">${renderIcon(r.icon)}</div><h2>${esc(r.title)}</h2><p>${r.cost} 分的美好期待</p><button class="${state.balance - state.frozen >= r.cost ? 'primary' : 'outline'}" data-action="redeem" data-id="${r.id}" ${state.balance - state.frozen < r.cost ? 'disabled' : ''}>${state.balance - state.frozen >= r.cost ? '申请兑换 →' : `还差 ${r.cost - state.balance + state.frozen} 分`}</button></article>`).join('')}</div><div class="section-title"><h2>我的兑换记录</h2></div>${redemptions(false)}`; }
 function redemptions(parent) { const names = { pending: '等待家长批准', approved: '待家长兑现', delivered: '已兑现', rejected: '未通过', cancelled: '已取消' }; return state.redemptions.length ? `<div class="panel">${state.redemptions.slice().reverse().map(r => `<div class="record"><span class="record-icon">${renderIcon(r.icon)}</span><div><b>${esc(r.title)}</b><p>${names[r.status]} · ${r.cost} 分</p></div>${parent && r.status === 'pending' ? `<button data-action="redemption" data-id="${r.id}" data-op="approve">批准</button><button class="subtle" data-action="redemption" data-id="${r.id}" data-op="reject">拒绝</button>` : parent && r.status === 'approved' ? `<button data-action="redemption" data-id="${r.id}" data-op="deliver">标记兑现</button><button class="subtle" data-action="redemption" data-id="${r.id}" data-op="refund">取消退款</button>` : '<span class="record-tail">✦</span>'}</div>`).join('')}</div>` : '<div class="empty compact">还没有兑换记录，期待第一份小惊喜。</div>'; }
 function growth() {
@@ -74,7 +96,7 @@ document.addEventListener('click', async e => {
   if (a === 'revoke-ai-token') { if (!confirm('撤销后使用此令牌的 AI 将立即失去访问权限，确定撤销？')) return; try { await api('ai-token-revoke', {id: el.dataset.id}); await showAITokens(); } catch (error) { toast(error.message); } return; }
   if (a === 'management-tab') { managementTab = el.dataset.tab; render(); if (managementTab === 'history') await loadHistory(); return; }
   if (a === 'history-query') { historyDay = document.querySelector('#history-day').value; return loadHistory(); }
-  if (a === 'history-task') { if (!confirm('确认修改该日审核状态？撤销完成会扣回原积分并取消待审批兑换。')) return; try { await api('task',{id:el.dataset.id,operation}); await refresh(); await loadHistory(); } catch(error){toast(error.message)} return; }
+  if (a === 'history-task') { if (operation !== 'undo' && !confirm('确认修改该日审核状态？')) return; try { await api('task',{id:el.dataset.id,operation}); await refresh(); await loadHistory(); toast(operation === 'undo' ? '已取消完成并扣回积分' : '审核状态已更新'); } catch(error){toast(error.message)} return; }
   if (a === 'close') return modal.close();
   if (a === 'login') return dialog('进入家长模式', field('家长密码', 'password', '输入初始化时设置的密码', 'password'), 'login', '解锁');
   if (a === 'activity' || a === 'edit-activity') {
@@ -92,6 +114,8 @@ document.addEventListener('click', async e => {
   if (a === 'withdraw-wish' && !confirm('撤回这个尚未审批的心愿？')) return;
   if (a === 'deduct') return dialog('记录一次扣分', field('扣除积分','points','','number',5) + field('扣分原因','reason','请写清楚具体原因'), 'deduct');
   if (a === 'auto-approve') { try { await api('auto-approve',{enabled:!state.settings?.autoApprove?.enabled}); await refresh(); toast('定时审核设置已保存'); } catch(error){toast(error.message)} return; }
+  if (a === 'edit-family') return dialog('修改家庭名称', field('家庭名称','family','','text',state.family), 'edit-family');
+  if (a === 'edit-child') return dialog('修改孩子姓名', '<input type="hidden" name="child" value="' + el.dataset.id + '">' + field('孩子姓名','name','','text',state.children.find(c => c.id === el.dataset.id).name), 'edit-child');
   if (a === 'goal') return dialog('这周的小目标', field('本周活动积分目标', 'goal', '', 'number', state.goal), 'goal');
   if (a === 'child') return dialog('欢迎新的小树苗', field('孩子昵称', 'name', '输入昵称'), 'child');
   if (a === 'bonus') return dialog('给努力一点鼓励', field('鼓励积分', 'points', '', 'number', 5) + field('鼓励的原因', 'reason', '例如：主动帮助家人'), 'bonus');
@@ -107,7 +131,7 @@ document.addEventListener('click', async e => {
   if (a === 'delete-activity' && !confirm('删除此活动？今天未完成的任务会移除，待审核、已完成和积分记录保留。')) return;
   if (a === 'delete-reward' && !confirm('删除此奖励？之后不能新申请兑换，已有兑换记录和待处理申请保留。')) return;
   if (a === 'redeem' && !confirm('申请这份奖励吗？所需积分将冻结，等待家长批准。')) return;
-  if (a === 'task' && operation === 'undo') { const t = state.tasks.find(t => t.id === el.dataset.id); if (!confirm('取消完成并扣回 ' + t.points + ' 分？待审批的兑换申请也会取消。')) return; }
+  if (a === 'task' && operation === 'undo' && !state.parent) { const t = state.tasks.find(t => t.id === el.dataset.id); if (!confirm('取消完成并扣回 ' + t.points + ' 分？待审批的兑换申请也会取消。')) return; }
   if (busy) return; busy = true; el.disabled = true;
   try { await api(a, { id: el.dataset.id, operation }); if (a === 'logout') page = 'profile'; toast(operation === 'withdraw' ? '已取消提交，积分未变化' : operation === 'undo' ? '已取消完成并扣回积分' : a === 'complete' ? '又前进了一小步！' : a === 'redeem' ? '已申请，等待家长确认' : '操作成功'); await refresh(); } catch (err) { toast(err.message); el.disabled = false; } finally { busy = false; }
 });
@@ -165,7 +189,7 @@ function manage() {
  if(managementTab === 'points') body = '<section class="panel settings-panel"><h2>积分与目标</h2><p>可用 '+(state.balance-state.frozen)+' 分 · 本周 '+state.weekPoints+' / '+state.goal+' 分。扣分须填写原因，不能超过可用余额，不减少累计获得和本周任务积分。</p><div class="management-actions">'+action('goal','设置周目标')+action('bonus','鼓励加分')+action('deduct','记录扣分')+'</div></section>';
  if(managementTab === 'rewards') body = '<div class="management-actions">'+action('reward','＋ 添加奖励')+'</div><div class="section-title"><h2>心愿审批</h2></div>'+wishList(true)+'<div class="section-title"><h2>奖励管理</h2></div>'+panelFor('奖励管理')+'<div class="section-title"><h2>兑换与兑现</h2></div>'+redemptions(true);
  if(managementTab === 'history') body = '<section class="panel settings-panel"><h2>按日期回查</h2><p>查询该日已经生成的任务和审核记录；没有记录的日期不会补造任务。撤销按任务原日期冲回积分。</p><div class="management-actions"><input id="history-day" type="date" max="'+state.today+'" value="'+(historyDay||state.today)+'"><button data-action="history-query">查询</button></div></section><div id="history-result">请选择日期并查询</div>';
- if(managementTab === 'settings') body = '<section class="panel settings-panel"><h2>家庭与接入</h2><p>管理家庭成员、AI 授权和数据导出。</p><div class="management-actions">'+action('child','添加孩子')+action('ai-tokens','AI 接入令牌')+action('logout','退出家长控制')+'<a class="button outline" href="/api/export" download>导出数据</a></div></section>';
+ if(managementTab === 'settings') body = '<section class="panel settings-panel"><h2>家庭与接入</h2><p>管理家庭成员、AI 授权和数据导出。</p><div class="management-actions">'+action('edit-family','修改家庭名称')+action('child','添加孩子')+action('ai-tokens','AI 接入令牌')+action('logout','退出家长控制')+'<a class="button outline" href="/api/export" download>导出数据</a></div></section><div class="section-title"><h2>孩子与专属入口</h2></div><div class="panel">'+state.children.map((c,i)=>'<div class="record"><div><b>'+esc(c.name)+'</b><p><a href="/'+(i+1)+'">'+esc(location.origin)+'/'+(i+1)+'</a></p></div><button class="outline" data-action="edit-child" data-id="'+c.id+'">修改姓名</button></div>').join('')+'</div>'; 
  return '<div class="section-title"><div><h2>家长控制</h2><p>管理完成后，可退出并交回孩子使用</p></div><button class="outline" data-action="logout">退出家长控制</button></div><div class="management-tabs">'+Object.entries(tabs).map(([key,label])=>'<button class="'+(key===managementTab?'primary':'outline')+'" data-action="management-tab" data-tab="'+key+'">'+label+'</button>').join('')+'</div>'+body;
 }
 async function loadHistory() {

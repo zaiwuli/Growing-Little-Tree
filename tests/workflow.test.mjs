@@ -149,5 +149,17 @@ test('审核、重复打卡、兑换冻结和权限', async () => {
     const history = await api('history?child=' + child + '&day=' + day);
     assert.equal(history.status, 200);
     assert.ok(history.data.events.length > 0);
+    assert.equal((await api('edit-family', { family: '新家庭' }, false)).status, 403);
+    await api('edit-family', { family: '新家庭' });
+    await api('edit-child', { name: '大宝改名' });
+    await api('child', { name: '二宝' });
+    assert.equal((await api('state?slot=1')).data.children[0].name, '大宝改名');
+    const second = (await api('state?slot=2')).data;
+    assert.equal(second.child, second.children[1].id);
+    assert.equal(second.family, '新家庭');
+    assert.equal((await api('state?slot=99')).status, 404);
+    assert.equal((await fetch('http://127.0.0.1:3127/2')).status, 200);
+    const manifest = await (await fetch('http://127.0.0.1:3127/manifest.webmanifest?slot=2')).json();
+    assert.equal(manifest.start_url, '/2');
   } finally { server.kill(); await new Promise(resolve => server.exitCode !== null ? resolve() : server.once('exit', resolve)); rmSync(dir, { recursive: true, force: true }); }
 });

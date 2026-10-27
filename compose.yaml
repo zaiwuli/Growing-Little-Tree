@@ -2,7 +2,7 @@ services:
   growing-little-tree:
     image: ghcr.io/zaiwuli/growing-little-tree:latest
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     environment:
       TZ: Asia/Shanghai
     volumes:

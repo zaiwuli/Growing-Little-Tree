@@ -92,8 +92,9 @@ const server = http.createServer(async (req, res) => {
     if (!url.pathname.startsWith('/api/')) {
       const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/style.css': ['style.css', 'text/css; charset=utf-8'] };
       files['/toothbrush.svg'] = ['toothbrush.svg', 'image/svg+xml'];
+      for (const name of ['icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'manifest.webmanifest', 'sw.js']) files['/' + name] = [name, name.endsWith('.png') ? 'image/png' : name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.webmanifest') ? 'application/manifest+json' : 'text/javascript; charset=utf-8'];
       const file = files[url.pathname]; if (!file) return send(404, { error: '页面不存在' });
-      res.writeHead(200, { 'Content-Type': file[1], 'X-Content-Type-Options': 'nosniff' }); return res.end(readFileSync(path.join(root, 'public', file[0])));
+      res.writeHead(200, { 'Content-Type': file[1], 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' }); return res.end(readFileSync(path.join(root, 'public', file[0])));
     }
     let s = load();
     const token = req.headers.cookie?.match(/(?:^|; )session=([a-f0-9]+)/)?.[1];
@@ -109,7 +110,7 @@ const server = http.createServer(async (req, res) => {
       const result = view(s, child); save(s); return send(200, { ...result, parent: !!parent });
     }
     if (req.method !== 'POST') fail('不支持的请求方式', 405);
-    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) fail('请求来源不匹配', 403);
+    if (req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) fail('请求来源不匹配', 403);
     let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 20000) fail('请求过大', 413); }
     let b; try { b = JSON.parse(raw || '{}'); } catch { fail('请求格式不正确'); }
     s = load();

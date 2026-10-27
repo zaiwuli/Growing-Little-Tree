@@ -1,15 +1,14 @@
 services:
   growing-little-tree:
     image: ghcr.io/zaiwuli/growing-little-tree:latest
+    user: "0:0"
     ports:
       - "3000:3000"
     environment:
       TZ: Asia/Shanghai
     volumes:
-      - growth-data:/app/data
+      - /volume1/docker/growing-little-tree:/app/data
     restart: unless-stopped
     init: true
     security_opt:
       - no-new-privileges:true
-volumes:
-  growth-data:

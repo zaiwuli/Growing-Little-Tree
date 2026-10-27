@@ -41,7 +41,7 @@ NAS 部署后访问 http://NAS的局域网IP:3000，手机和平板连接同一�
 
 时区通过 TZ: Asia/Shanghai 明确配置，应用任务日期和周目标也固定按北京时间计算。容器共享宿主机系统时钟，不独立运行 NTP；请在电脑或 NAS 上开启自动校时。时区配置只影响时间显示与解释，不负责修正宿主机时钟。
 
-数据保存在 Docker 命名卷 growth-data 中，与项目本机 data 目录隔离。更新镜像不会清空数据；不要使用 docker compose down -v，否则会删除数据卷。备份前停止应用并备份该命名卷。
+当前 Compose 为 NAS 配置：请先创建 /volume1/docker/growing-little-tree，数据库持久化到该目录。容器按此配置以 root（0:0）运行，以兼容当前 NAS 目录权限。更新镜像不会清空挂载目录；备份前停止应用，再复制该目录。此 NAS 路径与开发机 data 目录隔离。
 
 GitHub Actions 在 main 分支推送或 v 开头的标签推送后运行测试，并构建 linux/amd64、linux/arm64 镜像：
 

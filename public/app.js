@@ -40,7 +40,7 @@ function growth() {
 }
 function manage() {
   if (!state.parent) return '<div class="empty"><span>🔒</span><h2>这是家长的小园地</h2><p>解锁后可以设置活动、确认完成和管理奖励。</p><button class="primary" data-action="login">解锁家长模式</button></div>';
-  return `<div class="management-actions"><button class="primary" data-action="activity">＋ 新建活动</button><button class="outline" data-action="goal">设置周目标</button><button class="outline" data-action="reward">添加奖励</button><button class="outline" data-action="child">添加孩子</button><button class="outline" data-action="bonus">鼓励加分</button><a class="button outline" href="/api/export" download>导出数据</a></div><div class="section-title"><h2>今日完成审核</h2></div><div class="panel">${state.tasks.filter(t => t.status !== 'todo').map(t => `<div class="record"><span class="record-icon">${renderIcon(t.icon)}</span><div><b>${esc(t.title)}</b><p>${t.status === 'pending' ? '待确认' : '已完成'} · ${t.points} 分</p></div>${t.status === 'pending' ? `<button data-action="task" data-id="${t.id}" data-op="approve">通过</button><button class="subtle" data-action="task" data-id="${t.id}" data-op="reject">退回</button>` : `<button class="subtle" data-action="task" data-id="${t.id}" data-op="undo">撤销完成</button>`}</div>`).join('') || '<p class="panel-empty">暂时没有待审核或已完成的活动</p>'}</div><div class="section-title"><h2>活动安排</h2><span class="muted">暂停从后续生成的任务生效</span></div><div class="panel">${state.activities.map(a => `<div class="record"><span class="record-icon">${renderIcon(a.icon)}</span><div><b>${esc(a.title)}</b><p>${a.days.map(d => ['日', '一', '二', '三', '四', '五', '六'][d]).join('、')} · ${esc(a.period)} · ${a.points} 分 · ${a.review ? '需审核' : '直接计分'}</p></div><button class="outline" data-action="edit-activity" data-id="${a.id}">编辑</button><button class="${a.active ? 'subtle' : 'outline'}" data-action="toggle" data-id="${a.id}">${a.active ? '暂停' : '启用'}</button></div>`).join('') || '<p class="panel-empty">还没有活动，点击上方新建</p>'}</div><div class="section-title"><h2>奖励申请与兑现</h2></div>${redemptions(true)}`;
+  return `<div class="management-actions"><button class="primary" data-action="activity">＋ 新建活动</button><button class="outline" data-action="goal">设置周目标</button><button class="outline" data-action="reward">添加奖励</button><button class="outline" data-action="child">添加孩子</button><button class="outline" data-action="bonus">鼓励加分</button><button class="outline" data-action="ai-tokens">AI 接入令牌</button><a class="button outline" href="/api/export" download>导出数据</a></div><div class="section-title"><h2>今日完成审核</h2></div><div class="panel">${state.tasks.filter(t => t.status !== 'todo').map(t => `<div class="record"><span class="record-icon">${renderIcon(t.icon)}</span><div><b>${esc(t.title)}</b><p>${t.status === 'pending' ? '待确认' : '已完成'} · ${t.points} 分</p></div>${t.status === 'pending' ? `<button data-action="task" data-id="${t.id}" data-op="approve">通过</button><button class="subtle" data-action="task" data-id="${t.id}" data-op="reject">退回</button>` : `<button class="subtle" data-action="task" data-id="${t.id}" data-op="undo">撤销完成</button>`}</div>`).join('') || '<p class="panel-empty">暂时没有待审核或已完成的活动</p>'}</div><div class="section-title"><h2>活动安排</h2><span class="muted">暂停从后续生成的任务生效</span></div><div class="panel">${state.activities.map(a => `<div class="record"><span class="record-icon">${renderIcon(a.icon)}</span><div><b>${esc(a.title)}</b><p>${a.days.map(d => ['日', '一', '二', '三', '四', '五', '六'][d]).join('、')} · ${esc(a.period)} · ${a.points} 分 · ${a.review ? '需审核' : '直接计分'}</p></div><button class="outline" data-action="edit-activity" data-id="${a.id}">编辑</button><button class="${a.active ? 'subtle' : 'outline'}" data-action="toggle" data-id="${a.id}">${a.active ? '暂停' : '启用'}</button></div>`).join('') || '<p class="panel-empty">还没有活动，点击上方新建</p>'}</div><div class="section-title"><h2>奖励申请与兑现</h2></div>${redemptions(true)}`;
 }
 function dialog(title, fields, action, button = '保存') {
   modal.innerHTML = `<form id="dialog-form"><div class="dialog-heading"><h2>${title}</h2><button type="button" class="close" data-action="close" aria-label="关闭">×</button></div>${fields}<p id="form-error" role="alert"></p><button class="primary submit">${button}</button></form>`; modal.showModal();
@@ -69,6 +69,8 @@ document.addEventListener('click', async e => {
   if (el.dataset.page) { page = el.dataset.page; render(); window.scrollTo(0, 0); return; }
   let a = el.dataset.action;
   let operation = el.dataset.op;
+  if (a === 'ai-tokens') return showAITokens();
+  if (a === 'revoke-ai-token') { if (!confirm('撤销后使用此令牌的 AI 将立即失去访问权限，确定撤销？')) return; try { await api('ai-token-revoke', {id: el.dataset.id}); await showAITokens(); } catch (error) { toast(error.message); } return; }
   if (a === 'close') return modal.close();
   if (a === 'login') return dialog('进入家长模式', field('家长密码', 'password', '输入初始化时设置的密码', 'password'), 'login', '解锁');
   if (a === 'activity' || a === 'edit-activity') {
@@ -97,3 +99,21 @@ if (new URLSearchParams(location.search).has('phone-preview')) {
 } else refresh();
 
 if ('serviceWorker' in navigator && window.isSecureContext) { navigator.serviceWorker.register('/sw.js').catch(() => {}); }
+
+async function showAITokens() {
+  try {
+    const { tokens } = await api('ai-tokens');
+    modal.innerHTML = '<div class="dialog-heading"><h2>AI 接入令牌</h2><button class="close" data-action="close">×</button></div><p class="muted">只读可查询全部孩子数据；管理可修改活动、积分、目标和奖励。令牌最长有效 365 天。</p><form id="token-form">' + field('令牌名称','name','例如：家庭 AI 助手') + '<label>权限<select name="scope"><option value="read">只读查询（推荐）</option><option value="manage">管理：含计分、审核与兑换</option></select></label>' + field('有效天数','days','','number',90) + '<button class="primary">创建令牌</button><p id="token-error" role="alert"></p></form><div id="token-secret"></div><div class="panel">' + tokens.map(t => '<div class="record"><div><b>' + esc(t.name) + '</b><p>' + (t.scope === 'read' ? '只读' : '管理') + ' · 到期 ' + t.expiresAt.slice(0,10) + (t.revokedAt ? ' · 已撤销' : '') + '</p></div>' + (!t.revokedAt ? '<button class="subtle" data-action="revoke-ai-token" data-id="' + t.id + '">撤销</button>' : '') + '</div>').join('') + '</div>';
+    if (!modal.open) modal.showModal();
+    document.querySelector('#token-form').onsubmit = async event => {
+      event.preventDefault(); const button = event.target.querySelector('button'); button.disabled = true;
+      try {
+        const result = await api('ai-token-create', Object.fromEntries(new FormData(event.target)));
+        document.querySelector('#token-secret').innerHTML = '<p><b>令牌仅显示这一次，请立即保存</b></p><textarea readonly aria-label="新建的 AI 访问令牌" style="width:100%;min-height:90px;overflow-wrap:anywhere"></textarea><p class="muted">请勿放入网址或公开分享。关闭后只能撤销并重新创建。</p>';
+        document.querySelector('#token-secret textarea').value = result.token;
+        document.querySelector('#token-secret textarea').select();
+        button.textContent = '已创建，关闭后可查看列表';
+      } catch(error) { document.querySelector('#token-error').textContent = error.message; button.disabled = false; }
+    };
+  } catch(error) { toast(error.message); }
+}

@@ -65,5 +65,25 @@ test('审核、重复打卡、兑换冻结和权限', async () => {
     assert.equal((await api('state')).data.balance, -50);
     const cross = await fetch('http://127.0.0.1:3127/api/goal', { method: 'POST', headers: { Origin: 'http://evil.example', 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ child, goal: 10 }) });
     assert.equal(cross.status, 403);
+    const readToken = (await api('ai-token-create', { name: '只读测试', scope: 'read', days: 1 })).data;
+    const manager = (await api('ai-token-create', { name: '管理测试', scope: 'manage', days: 1 })).data;
+    async function ai(route, token, body, key = 'test-write') {
+      return fetch('http://127.0.0.1:3127/api/ai/v1/' + route, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', 'Idempotency-Key': key }, ...(body ? { body: JSON.stringify({ child, ...body }) } : {}) });
+    }
+    assert.equal((await ai('state', 'invalid')).status, 401);
+    assert.equal((await ai('state', readToken.token)).status, 200);
+    assert.equal((await ai('bonus', readToken.token, { points: 5, reason: '测试' })).status, 403);
+    const before = (await api('state')).data.balance;
+    assert.equal((await ai('bonus', manager.token, { points: 5, reason: 'AI鼓励' })).status, 200);
+    assert.equal((await (await ai('bonus', manager.token, { points: 5, reason: 'AI鼓励' })).json()).replayed, true);
+    assert.equal((await api('state')).data.balance, before + 5);
+    assert.equal((await ai('bonus', manager.token, { points: 6, reason: 'AI鼓励' })).status, 409);
+    assert.equal((await ai('ai-token-create', manager.token, { name: '不允许' })).status, 404);
+    const exported = (await api('export')).data;
+    assert.equal(exported.aiTokens, undefined);
+    assert.equal(JSON.stringify((await api('ai-tokens')).data).includes(manager.token), false);
+    await api('ai-token-revoke', { id: readToken.id });
+    assert.equal((await ai('state', readToken.token)).status, 401);
+    assert.equal((await api('ai-token-create', { name: '越权', scope: 'manage', days: 1 }, false)).status, 403);
   } finally { server.kill(); await new Promise(resolve => server.exitCode !== null ? resolve() : server.once('exit', resolve)); rmSync(dir, { recursive: true, force: true }); }
 });

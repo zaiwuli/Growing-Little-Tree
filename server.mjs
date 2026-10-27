@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -14,6 +14,16 @@ const date = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai',
 const load = () => JSON.parse(db.prepare('SELECT value FROM state WHERE id=1').get()?.value || 'null');
 const save = state => db.prepare('INSERT INTO state VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(JSON.stringify(state));
 const uid = () => randomBytes(10).toString('hex');
+const digest = token => createHash('sha256').update(token).digest('hex');
+const tokenInfo = ({ hash, ...info }) => info;
+function authenticateAI(s, req) {
+  const match = req.headers.authorization?.match(/^Bearer (glt_[a-f0-9]{64})$/);
+  if (!match) fail('需要有效的 Bearer 访问令牌', 401);
+  const hash = digest(match[1]);
+  const token = (s.aiTokens || []).find(t => !t.revokedAt && t.expiresAt > new Date().toISOString() && timingSafeEqual(Buffer.from(t.hash, 'hex'), Buffer.from(hash, 'hex')));
+  if (!token) fail('令牌无效、过期或已撤销', 401);
+  return token;
+}
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
 const text = (value, max = 80) => typeof value === 'string' && value.trim() && value.trim().length <= max ? value.trim() : fail('请填写有效内容');
 const number = (value, min = 0, max = 1000) => Number.isInteger(Number(value)) && Number(value) >= min && Number(value) <= max ? Number(value) : fail('数值超出允许范围');
@@ -100,10 +110,21 @@ const server = http.createServer(async (req, res) => {
     const token = req.headers.cookie?.match(/(?:^|; )session=([a-f0-9]+)/)?.[1];
     const session = sessions.get(token);
     const parent = session && session > Date.now();
+    const aiRoute = url.pathname.startsWith('/api/ai/v1/');
+    if (aiRoute && req.method === 'GET') {
+      if (!s) fail('请先初始化', 401);
+      const credential = authenticateAI(s, req);
+      if (url.pathname !== '/api/ai/v1/state') fail('接口不存在', 404);
+      const child = url.searchParams.get('child') || s.children[0].id;
+      if (!s.children.some(c => c.id === child)) fail('孩子不存在');
+      const result = view(s, child); credential.lastUsedAt = new Date().toISOString(); save(s);
+      return send(200, result);
+    }
     if (req.method === 'GET') {
+      if (url.pathname === '/api/ai-tokens') { if (!parent) fail('请先解锁家长模式', 403); return send(200, { tokens: (s?.aiTokens || []).map(tokenInfo) }); }
       if (url.pathname === '/api/status') return send(200, { initialized: !!s, parent: !!parent });
       if (!s) return send(200, { initialized: false });
-      if (url.pathname === '/api/export') { if (!parent) fail('请先解锁家长模式', 403); const { password, salt, ...backup } = s; return send(200, backup, { 'Content-Disposition': 'attachment; filename="growth-export.json"' }); }
+      if (url.pathname === '/api/export') { if (!parent) fail('请先解锁家长模式', 403); const { password, salt, aiTokens, aiRequests, ...backup } = s; return send(200, backup, { 'Content-Disposition': 'attachment; filename="growth-export.json"' }); }
       if (url.pathname !== '/api/state') fail('接口不存在', 404);
       const child = url.searchParams.get('child') || s.children[0].id;
       if (!s.children.some(c => c.id === child)) fail('孩子不存在');
@@ -115,6 +136,35 @@ const server = http.createServer(async (req, res) => {
     let b; try { b = JSON.parse(raw || '{}'); } catch { fail('请求格式不正确'); }
     s = load();
     const action = url.pathname.slice(5);
+    if (aiRoute) {
+      if (!s) fail('请先初始化', 401);
+      const credential = authenticateAI(s, req);
+      if (credential.scope !== 'manage') fail('此令牌只有读取权限', 403);
+      const aiAction = url.pathname.slice('/api/ai/v1/'.length);
+      if (!['activity', 'edit-activity', 'toggle', 'complete', 'task', 'goal', 'bonus', 'reward', 'redeem', 'redemption'].includes(aiAction)) fail('接口不存在', 404);
+      const requestId = text(req.headers['idempotency-key'], 100);
+      s.aiRequests ||= [];
+      const fingerprint = digest(JSON.stringify([aiAction, b]));
+      const previous = s.aiRequests.find(r => r.token === credential.id && r.key === requestId);
+      if (previous) { if (previous.fingerprint !== fingerprint) fail('同一 Idempotency-Key 不能用于不同请求', 409); return send(200, { ok: true, replayed: true }); }
+      mutate(s, aiAction, b, true);
+      credential.lastUsedAt = new Date().toISOString();
+      s.aiRequests.push({ token: credential.id, key: requestId, fingerprint, action: aiAction, child: b.child, at: credential.lastUsedAt });
+      save(s); return send(200, { ok: true });
+    }
+    if (action === 'ai-token-create' || action === 'ai-token-revoke') {
+      if (!parent) fail('请先解锁家长模式', 403);
+      s.aiTokens ||= [];
+      if (action === 'ai-token-revoke') {
+        const record = s.aiTokens.find(t => t.id === b.id) || fail('令牌不存在');
+        record.revokedAt = new Date().toISOString(); save(s); return send(200, { ok: true });
+      }
+      if (!['read', 'manage'].includes(b.scope)) fail('请选择有效权限');
+      if (s.aiTokens.filter(t => !t.revokedAt && t.expiresAt > new Date().toISOString()).length >= 20) fail('最多创建 20 个有效令牌');
+      const token = 'glt_' + randomBytes(32).toString('hex');
+      const record = { id: uid(), name: text(b.name, 40), scope: b.scope, hash: digest(token), createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + number(b.days, 1, 365) * 86400000).toISOString() };
+      s.aiTokens.push(record); save(s); return send(200, { token, ...tokenInfo(record) });
+    }
     if (action === 'setup') {
       if (s) fail('已经初始化');
       const password = text(b.password, 128); if (password.length < 8) fail('家长密码至少 8 位');

@@ -1,14 +1,10 @@
 services:
   growing-little-tree:
     image: ghcr.io/zaiwuli/growing-little-tree:latest
-    build:
-      context: .
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
+      - "127.0.0.1:3000:3000"
     environment:
-      HOST: 0.0.0.0
-      PORT: 3000
-      DB_PATH: /app/data/growth.sqlite
+      TZ: Asia/Shanghai
     volumes:
       - growth-data:/app/data
     restart: unless-stopped

@@ -5,3 +5,4 @@
 .reward-empty{grid-column:1/-1}
 .brand>img{width:46px;height:46px;border-radius:12px;flex-shrink:0}.brandmark img{width:72px;height:72px;border-radius:18px}
 .family{display:flex;align-items:center;gap:8px}.family-logo{width:30px;height:30px;border-radius:8px;flex-shrink:0}@media(max-width:760px){.family-logo{width:26px;height:26px}.family{font-size:12px}}
+.icon-dropdown{border:1px solid var(--line);border-radius:12px;background:var(--paper)}.icon-dropdown summary{display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;min-height:56px;font-size:12px;list-style:none}.icon-dropdown summary::-webkit-details-marker{display:none}.selected-icon{font-size:27px;min-width:34px}.icon-chevron{margin-left:auto;color:var(--muted)}.icon-dropdown[open] .icon-chevron{transform:rotate(180deg)}.icon-dropdown-content{padding:0 12px 14px;max-height:310px;overflow:auto}.danger{color:#ae624b}

@@ -40,7 +40,7 @@ function growth() {
 }
 function manage() {
   if (!state.parent) return '<div class="empty"><span>🔒</span><h2>这是家长的小园地</h2><p>解锁后可以设置活动、确认完成和管理奖励。</p><button class="primary" data-action="login">解锁家长模式</button></div>';
-  return `<div class="management-actions"><button class="primary" data-action="activity">＋ 新建活动</button><button class="outline" data-action="goal">设置周目标</button><button class="outline" data-action="reward">添加奖励</button><button class="outline" data-action="child">添加孩子</button><button class="outline" data-action="bonus">鼓励加分</button><button class="outline" data-action="ai-tokens">AI 接入令牌</button><a class="button outline" href="/api/export" download>导出数据</a></div><div class="section-title"><h2>今日完成审核</h2></div><div class="panel">${state.tasks.filter(t => t.status !== 'todo').map(t => `<div class="record"><span class="record-icon">${renderIcon(t.icon)}</span><div><b>${esc(t.title)}</b><p>${t.status === 'pending' ? '待确认' : '已完成'} · ${t.points} 分</p></div>${t.status === 'pending' ? `<button data-action="task" data-id="${t.id}" data-op="approve">通过</button><button class="subtle" data-action="task" data-id="${t.id}" data-op="reject">退回</button>` : `<button class="subtle" data-action="task" data-id="${t.id}" data-op="undo">撤销完成</button>`}</div>`).join('') || '<p class="panel-empty">暂时没有待审核或已完成的活动</p>'}</div><div class="section-title"><h2>活动安排</h2><span class="muted">暂停从后续生成的任务生效</span></div><div class="panel">${state.activities.map(a => `<div class="record"><span class="record-icon">${renderIcon(a.icon)}</span><div><b>${esc(a.title)}</b><p>${a.days.map(d => ['日', '一', '二', '三', '四', '五', '六'][d]).join('、')} · ${esc(a.period)} · ${a.points} 分 · ${a.review ? '需审核' : '直接计分'}</p></div><button class="outline" data-action="edit-activity" data-id="${a.id}">编辑</button><button class="${a.active ? 'subtle' : 'outline'}" data-action="toggle" data-id="${a.id}">${a.active ? '暂停' : '启用'}</button></div>`).join('') || '<p class="panel-empty">还没有活动，点击上方新建</p>'}</div><div class="section-title"><h2>奖励申请与兑现</h2></div>${redemptions(true)}`;
+  return `<div class="management-actions"><button class="primary" data-action="activity">＋ 新建活动</button><button class="outline" data-action="goal">设置周目标</button><button class="outline" data-action="reward">添加奖励</button><button class="outline" data-action="child">添加孩子</button><button class="outline" data-action="bonus">鼓励加分</button><button class="outline" data-action="ai-tokens">AI 接入令牌</button><a class="button outline" href="/api/export" download>导出数据</a></div><div class="section-title"><h2>今日完成审核</h2></div><div class="panel">${state.tasks.filter(t => t.status !== 'todo').map(t => `<div class="record"><span class="record-icon">${renderIcon(t.icon)}</span><div><b>${esc(t.title)}</b><p>${t.status === 'pending' ? '待确认' : '已完成'} · ${t.points} 分</p></div>${t.status === 'pending' ? `<button data-action="task" data-id="${t.id}" data-op="approve">通过</button><button class="subtle" data-action="task" data-id="${t.id}" data-op="reject">退回</button>` : `<button class="subtle" data-action="task" data-id="${t.id}" data-op="undo">撤销完成</button>`}</div>`).join('') || '<p class="panel-empty">暂时没有待审核或已完成的活动</p>'}</div><div class="section-title"><h2>活动安排</h2><span class="muted">暂停从后续生成的任务生效</span></div><div class="panel">${state.activities.map(a => `<div class="record"><span class="record-icon">${renderIcon(a.icon)}</span><div><b>${esc(a.title)}</b><p>${a.days.map(d => ['日', '一', '二', '三', '四', '五', '六'][d]).join('、')} · ${esc(a.period)} · ${a.points} 分 · ${a.review ? '需审核' : '直接计分'}</p></div><button class="outline" data-action="edit-activity" data-id="${a.id}">编辑</button><button class="${a.active ? 'subtle' : 'outline'}" data-action="toggle" data-id="${a.id}">${a.active ? '暂停' : '启用'}</button><button class="subtle danger" data-action="delete-activity" data-id="${a.id}">删除</button></div>`).join('') || '<p class="panel-empty">还没有活动，点击上方新建</p>'}</div><div class="section-title"><h2>奖励管理</h2></div><div class="panel">${state.rewards.map(r => `<div class="record"><span class="record-icon">${renderIcon(r.icon)}</span><div><b>${esc(r.title)}</b><p>${r.cost} 分</p></div><button class="subtle danger" data-action="delete-reward" data-id="${r.id}">删除</button></div>`).join('') || '<p class="panel-empty">还没有奖励</p>'}</div><div class="section-title"><h2>奖励申请与兑现</h2></div>${redemptions(true)}`;
 }
 function dialog(title, fields, action, button = '保存') {
   modal.innerHTML = `<form id="dialog-form"><div class="dialog-heading"><h2>${title}</h2><button type="button" class="close" data-action="close" aria-label="关闭">×</button></div>${fields}<p id="form-error" role="alert"></p><button class="primary submit">${button}</button></form>`; modal.showModal();
@@ -62,7 +62,7 @@ function iconPicker(selected, reward = false) {
   ];
   if (reward) groups.unshift(...rewardGroups);
   if (!groups.some(([, items]) => items.some(([icon]) => icon === selected))) groups.unshift(['当前图标', [[selected, '原有图标']]]);
-  return `<fieldset class="icon-picker"><legend>选择${reward ? '奖励' : '活动'}图标</legend>${groups.map(([title, items]) => `<div class="icon-category">${title}</div><div class="icon-options">${items.map(([icon, label]) => `<label class="icon-option"><input type="radio" name="icon" value="${esc(icon)}" ${icon === selected ? 'checked' : ''} required><span><b>${renderIcon(icon)}</b><small>${label}</small></span></label>`).join('')}</div>`).join('')}</fieldset>`;
+  return `<fieldset class="icon-picker"><legend>选择${reward ? '奖励' : '活动'}图标</legend><details class="icon-dropdown"><summary><span class="selected-icon">${renderIcon(selected)}</span><span>点击选择图标</span><span class="icon-chevron">⌄</span></summary><div class="icon-dropdown-content">${groups.map(([title, items]) => `<div class="icon-category">${title}</div><div class="icon-options">${items.map(([icon, label]) => `<label class="icon-option"><input type="radio" name="icon" value="${esc(icon)}" ${icon === selected ? 'checked' : ''} required><span><b>${renderIcon(icon)}</b><small>${label}</small></span></label>`).join('')}</div>`).join('')}</div></details></fieldset>`;
 }
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-page], [data-action]'); if (!el) return;
@@ -89,6 +89,8 @@ document.addEventListener('click', async e => {
       a = 'task'; operation = 'undo';
     }
   }
+  if (a === 'delete-activity' && !confirm('删除此活动？今天未完成的任务会移除，待审核、已完成和积分记录保留。')) return;
+  if (a === 'delete-reward' && !confirm('删除此奖励？之后不能新申请兑换，已有兑换记录和待处理申请保留。')) return;
   if (a === 'redeem' && !confirm('申请这份奖励吗？所需积分将冻结，等待家长批准。')) return;
   if (a === 'task' && operation === 'undo') { const t = state.tasks.find(t => t.id === el.dataset.id); if (!confirm('取消完成并扣回 ' + t.points + ' 分？待审批的兑换申请也会取消。')) return; }
   if (busy) return; busy = true; el.disabled = true;
@@ -117,3 +119,10 @@ async function showAITokens() {
     };
   } catch(error) { toast(error.message); }
 }
+
+document.addEventListener('change', event => {
+  if (!event.target.matches('.icon-picker input[name="icon"]')) return;
+  const picker = event.target.closest('.icon-picker');
+  picker.querySelector('.selected-icon').innerHTML = renderIcon(event.target.value);
+  picker.querySelector('details').open = false;
+});

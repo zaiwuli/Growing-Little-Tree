@@ -29,7 +29,7 @@ const text = (value, max = 80) => typeof value === 'string' && value.trim() && v
 const number = (value, min = 0, max = 1000) => Number.isInteger(Number(value)) && Number(value) >= min && Number(value) <= max ? Number(value) : fail('数值超出允许范围');
 function tasks(s, child, day) {
   const weekday = new Date(day + 'T12:00:00+08:00').getUTCDay();
-  for (const a of s.activities.filter(a => a.child === child && a.active && a.start <= day && a.days.includes(weekday))) {
+  for (const a of s.activities.filter(a => a.child === child && !a.deletedAt && a.active && a.start <= day && a.days.includes(weekday))) {
     if (!s.tasks.some(t => t.activity === a.id && t.day === day)) s.tasks.push({ id: uid(), activity: a.id, child, day, title: a.title, icon: a.icon, points: a.points, period: a.period, review: a.review, status: 'todo' });
   }
   return s.tasks.filter(t => t.child === child && t.day === day);
@@ -44,13 +44,14 @@ function view(s, child) {
   start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
   const week = start.toISOString().slice(0, 10);
   const ledger = s.ledger.filter(l => l.child === child);
-  return { family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child), rewards: s.rewards, redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
+  return { family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child && !a.deletedAt), rewards: s.rewards.filter(r => !r.deletedAt), redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
 }
 function mutate(s, action, b, parent) {
   const c = s.children.find(c => c.id === b.child) || fail('孩子不存在');
   const requireParent = () => { if (!parent) fail('请先解锁家长模式', 403); };
   if (action === 'complete') {
     const t = s.tasks.find(t => t.id === b.id && t.child === c.id) || fail('活动不存在');
+    if (s.activities.some(a => a.id === t.activity && a.deletedAt)) fail('此活动已删除');
     if (t.status === 'todo') { t.status = t.review && !parent ? 'pending' : 'done'; if (t.status === 'done') entry(s, c.id, t.points, t.title, 'task', t.id); }
   } else if (action === 'task') {
     const t = s.tasks.find(t => t.id === b.id && t.child === c.id) || fail('活动不存在');
@@ -62,6 +63,15 @@ function mutate(s, action, b, parent) {
       for (const r of s.redemptions.filter(r => r.child === c.id && r.status === 'pending')) r.status = 'cancelled';
       t.status = 'todo'; entry(s, c.id, -t.points, '撤销：' + t.title, 'reverse', t.id);
     }
+  } else if (action === 'delete-activity') {
+    requireParent();
+    const a = s.activities.find(a => a.id === b.id && a.child === c.id) || fail('活动不存在');
+    a.deletedAt ||= new Date().toISOString(); a.active = false;
+    s.tasks = s.tasks.filter(t => !(t.activity === a.id && t.status === 'todo' && t.day >= date()));
+  } else if (action === 'delete-reward') {
+    requireParent();
+    const r = s.rewards.find(r => r.id === b.id) || fail('奖励不存在');
+    r.deletedAt ||= new Date().toISOString();
   } else if (action === 'activity' || action === 'edit-activity') {
     requireParent();
     const days = Array.isArray(b.days) && b.days.length && b.days.every(d => Number.isInteger(d) && d >= 0 && d <= 6) ? b.days : fail('请选择重复日期');
@@ -71,6 +81,7 @@ function mutate(s, action, b, parent) {
     if (action === 'activity') s.activities.push({ id: uid(), child: c.id, ...values, active: true, start: date() });
     else {
       const a = s.activities.find(a => a.id === b.id && a.child === c.id) || fail('活动不存在');
+      if (a.deletedAt) fail('此活动已删除');
       Object.assign(a, values);
       const today = date(), weekday = new Date(today + 'T12:00:00+08:00').getUTCDay();
       // Only untouched tasks follow the edited schedule; submitted and completed snapshots stay intact.
@@ -78,13 +89,13 @@ function mutate(s, action, b, parent) {
       for (const t of s.tasks.filter(t => t.activity === a.id && t.day === today && t.status === 'todo')) Object.assign(t, { title: a.title, icon: a.icon, points: a.points, period: a.period, review: a.review });
     }
   } else if (action === 'toggle') {
-    requireParent(); const a = s.activities.find(a => a.id === b.id && a.child === c.id) || fail('活动不存在'); a.active = !a.active;
+    requireParent(); const a = s.activities.find(a => a.id === b.id && a.child === c.id && !a.deletedAt) || fail('活动不存在'); a.active = !a.active;
   } else if (action === 'goal') { requireParent(); c.goal = number(b.goal, 1, 100000); }
   else if (action === 'child') { requireParent(); s.children.push({ id: uid(), name: text(b.name, 20), goal: 100 }); }
   else if (action === 'bonus') { requireParent(); entry(s, c.id, number(b.points, 1), text(b.reason), 'bonus'); }
   else if (action === 'reward') { requireParent(); s.rewards.push({ id: uid(), title: text(b.title), icon: text(b.icon || '🎁', 8), cost: number(b.cost, 1, 100000) }); }
   else if (action === 'redeem') {
-    const r = s.rewards.find(r => r.id === b.id) || fail('奖励不存在');
+    const r = s.rewards.find(r => r.id === b.id && !r.deletedAt) || fail('奖励不存在或已删除');
     if (balance(s, c.id) - frozen(s, c.id) < r.cost) fail('可用积分还不够，再加油！');
     s.redemptions.push({ id: uid(), child: c.id, title: r.title, icon: r.icon, cost: r.cost, status: 'pending', at: new Date().toISOString() });
   } else if (action === 'redemption') {
@@ -141,7 +152,7 @@ const server = http.createServer(async (req, res) => {
       const credential = authenticateAI(s, req);
       if (credential.scope !== 'manage') fail('此令牌只有读取权限', 403);
       const aiAction = url.pathname.slice('/api/ai/v1/'.length);
-      if (!['activity', 'edit-activity', 'toggle', 'complete', 'task', 'goal', 'bonus', 'reward', 'redeem', 'redemption'].includes(aiAction)) fail('接口不存在', 404);
+      if (!['activity', 'edit-activity', 'delete-activity', 'delete-reward', 'toggle', 'complete', 'task', 'goal', 'bonus', 'reward', 'redeem', 'redemption'].includes(aiAction)) fail('接口不存在', 404);
       const requestId = text(req.headers['idempotency-key'], 100);
       s.aiRequests ||= [];
       const fingerprint = digest(JSON.stringify([aiAction, b]));

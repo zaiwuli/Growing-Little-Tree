@@ -21,6 +21,8 @@ curl http://NAS的IP:3000/api/ai/v1/state \
 | --- | --- |
 | /activity | title, icon, points（0～1000）, days（0 周日至 6 周六数组）, period（早晨/放学后/晚上/自由时间）, review（布尔） |
 | /edit-activity | id（活动ID）以及与创建活动相同的全部字段 |
+| /delete-activity | id（活动ID）；移除活动安排与今天尚未完成的任务，保留待审核、已完成和积分历史 |
+| /delete-reward | id（奖励ID）；停止提供新兑换，保留已有兑换申请和历史 |
 | /toggle | id（活动ID）；切换暂停/启用 |
 | /complete | id（今日任务ID）；以家长权限直接确认并计分 |
 | /task | id（任务ID）, operation（withdraw/approve/reject/undo） |

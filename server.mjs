@@ -207,9 +207,15 @@ const server = http.createServer(async (req, res) => {
       s.aiRequests.push({ token: credential.id, key: requestId, fingerprint, action: aiAction, child: b.child, at: credential.lastUsedAt });
       save(s); return send(200, { ok: true });
     }
-    if (action === 'ai-token-create' || action === 'ai-token-revoke') {
+    if (['ai-token-create', 'ai-token-revoke', 'ai-token-delete'].includes(action)) {
       if (!parent) fail('请先解锁家长模式', 403);
       s.aiTokens ||= [];
+      if (action === 'ai-token-delete') {
+        const record = s.aiTokens.find(t => t.id === b.id) || fail('令牌不存在');
+        if (!record.revokedAt && record.expiresAt > new Date().toISOString()) fail('请先撤销有效令牌，再删除记录');
+        s.aiTokens = s.aiTokens.filter(t => t.id !== record.id);
+        save(s); return send(200, { ok: true });
+      }
       if (action === 'ai-token-revoke') {
         const record = s.aiTokens.find(t => t.id === b.id) || fail('令牌不存在');
         record.revokedAt = new Date().toISOString(); save(s); return send(200, { ok: true });

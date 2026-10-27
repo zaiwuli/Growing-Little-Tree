@@ -84,6 +84,11 @@ test('审核、重复打卡、兑换冻结和权限', async () => {
     assert.equal(JSON.stringify((await api('ai-tokens')).data).includes(manager.token), false);
     await api('ai-token-revoke', { id: readToken.id });
     assert.equal((await ai('state', readToken.token)).status, 401);
+    assert.equal((await api('ai-token-delete', { id: manager.id })).status, 400);
+    assert.equal((await api('ai-token-delete', { id: readToken.id }, false)).status, 403);
+    assert.equal((await api('ai-token-delete', { id: readToken.id })).status, 200);
+    assert.equal((await api('ai-tokens')).data.tokens.some(t => t.id === readToken.id), false);
+    assert.equal((await ai('state', readToken.token)).status, 401);
     assert.equal((await api('ai-token-create', { name: '越权', scope: 'manage', days: 1 }, false)).status, 403);
     const aiActivity = { title: 'AI新活动', icon: '📖', points: 10, days: [0,1,2,3,4,5,6], period: '晚上', review: false };
     assert.equal((await ai('activity', manager.token, aiActivity, 'create-activity')).status, 200);

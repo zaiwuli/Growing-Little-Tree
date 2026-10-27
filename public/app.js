@@ -70,6 +70,7 @@ document.addEventListener('click', async e => {
   let a = el.dataset.action;
   let operation = el.dataset.op;
   if (a === 'ai-tokens') return showAITokens();
+  if (a === 'delete-ai-token') { if (!confirm('删除这条令牌记录？此前的业务操作记录仍会保留。')) return; try { await api('ai-token-delete', {id:el.dataset.id}); await showAITokens(); toast('令牌记录已删除'); } catch(error) { toast(error.message); } return; }
   if (a === 'revoke-ai-token') { if (!confirm('撤销后使用此令牌的 AI 将立即失去访问权限，确定撤销？')) return; try { await api('ai-token-revoke', {id: el.dataset.id}); await showAITokens(); } catch (error) { toast(error.message); } return; }
   if (a === 'management-tab') { managementTab = el.dataset.tab; render(); if (managementTab === 'history') await loadHistory(); return; }
   if (a === 'history-query') { historyDay = document.querySelector('#history-day').value; return loadHistory(); }
@@ -119,7 +120,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) { navigator.serviceW
 async function showAITokens() {
   try {
     const { tokens } = await api('ai-tokens');
-    modal.innerHTML = '<div class="dialog-heading"><h2>AI 接入令牌</h2><button class="close" data-action="close">×</button></div><p class="muted">只读可查询全部孩子数据；管理可修改活动、积分、目标和奖励。令牌最长有效 365 天。</p><form id="token-form">' + field('令牌名称','name','例如：家庭 AI 助手') + '<label>权限<select name="scope"><option value="read">只读查询（推荐）</option><option value="manage">管理：含计分、审核与兑换</option></select></label>' + field('有效天数','days','','number',90) + '<button class="primary">创建令牌</button><p id="token-error" role="alert"></p></form><div id="token-secret"></div><div class="panel">' + tokens.map(t => '<div class="record"><div><b>' + esc(t.name) + '</b><p>' + (t.scope === 'read' ? '只读' : '管理') + ' · 到期 ' + t.expiresAt.slice(0,10) + (t.revokedAt ? ' · 已撤销' : '') + '</p></div>' + (!t.revokedAt ? '<button class="subtle" data-action="revoke-ai-token" data-id="' + t.id + '">撤销</button>' : '') + '</div>').join('') + '</div>';
+    modal.innerHTML = '<div class="dialog-heading"><h2>AI 接入令牌</h2><button class="close" data-action="close">×</button></div><p class="muted">只读可查询全部孩子数据；管理可修改活动、积分、目标和奖励。令牌最长有效 365 天。</p><form id="token-form">' + field('令牌名称','name','例如：家庭 AI 助手') + '<label>权限<select name="scope"><option value="read">只读查询（推荐）</option><option value="manage">管理：含计分、审核与兑换</option></select></label>' + field('有效天数','days','','number',90) + '<button class="primary">创建令牌</button><p id="token-error" role="alert"></p></form><div id="token-secret"></div><div class="panel">' + tokens.map(t => '<div class="record"><div><b>' + esc(t.name) + '</b><p>' + (t.scope === 'read' ? '只读' : '管理') + ' · 到期 ' + t.expiresAt.slice(0,10) + (t.revokedAt ? ' · 已撤销' : t.expiresAt <= new Date().toISOString() ? ' · 已过期' : '') + '</p></div>' + (!t.revokedAt && t.expiresAt > new Date().toISOString() ? '<button class="subtle" data-action="revoke-ai-token" data-id="' + t.id + '">撤销</button>' : '<button class="subtle danger" data-action="delete-ai-token" data-id="' + t.id + '">删除记录</button>') + '</div>').join('') + '</div>';
     if (!modal.open) modal.showModal();
     document.querySelector('#token-form').onsubmit = async event => {
       event.preventDefault(); const button = event.target.querySelector('button'); button.disabled = true;

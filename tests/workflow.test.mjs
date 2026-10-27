@@ -161,5 +161,20 @@ test('审核、重复打卡、兑换冻结和权限', async () => {
     assert.equal((await fetch('http://127.0.0.1:3127/2')).status, 200);
     const manifest = await (await fetch('http://127.0.0.1:3127/manifest.webmanifest?slot=2')).json();
     assert.equal(manifest.start_url, '/2');
+    const newActivity = { title:'排序活动一', icon:'📖', points:10, days:[0,1,2,3,4,5,6], period:'晚上', review:true };
+    await api('activity', newActivity);
+    await api('activity', { ...newActivity, title:'排序活动二' });
+    s = (await api('state')).data;
+    const first = s.activities.find(a => a.title === '排序活动一');
+    const last = s.activities.find(a => a.title === '排序活动二');
+    assert.equal((await api('move-activity', { id:last.id, direction:'up' }, false)).status, 403);
+    assert.equal((await api('move-activity', { id:last.id, direction:'up' })).status, 200);
+    s = (await api('state')).data;
+    assert.ok(s.activities.findIndex(a=>a.id===last.id) < s.activities.findIndex(a=>a.id===first.id));
+    assert.ok(s.tasks.findIndex(t=>t.activity===last.id) < s.tasks.findIndex(t=>t.activity===first.id));
+    assert.equal((await api('move-activity', { id:last.id, direction:'invalid' })).status, 400);
+    await api('move-activity', { id:last.id, direction:'down' });
+    s = (await api('state')).data;
+    assert.ok(s.activities.findIndex(a=>a.id===first.id) < s.activities.findIndex(a=>a.id===last.id));
   } finally { server.kill(); await new Promise(resolve => server.exitCode !== null ? resolve() : server.once('exit', resolve)); rmSync(dir, { recursive: true, force: true }); }
 });

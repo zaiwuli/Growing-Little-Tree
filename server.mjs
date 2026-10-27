@@ -33,7 +33,8 @@ function tasks(s, child, day) {
   for (const a of s.activities.filter(a => a.child === child && !a.deletedAt && a.active && a.start <= day && a.days.includes(weekday))) {
     if (!s.tasks.some(t => t.activity === a.id && t.day === day)) s.tasks.push({ id: uid(), activity: a.id, child, day, title: a.title, icon: a.icon, points: a.points, period: a.period, review: a.review, status: 'todo' });
   }
-  return s.tasks.filter(t => t.child === child && t.day === day);
+  const order = new Map(s.activities.map((a, i) => [a.id, i]));
+  return s.tasks.filter(t => t.child === child && t.day === day).sort((a, b) => (order.get(a.activity) ?? Infinity) - (order.get(b.activity) ?? Infinity));
 }
 const balance = (s, child) => s.ledger.filter(l => l.child === child).reduce((n, l) => n + l.amount, 0);
 const frozen = (s, child) => s.redemptions.filter(r => r.child === child && r.status === 'pending').reduce((n, r) => n + r.cost, 0);
@@ -99,6 +100,17 @@ function mutate(s, action, b, parent) {
     if (oldStatus !== t.status) {
       t.reviewedBy = 'parent'; t.reviewedAt = new Date().toISOString();
       s.taskEvents ||= []; s.taskEvents.push({ task:t.id, child:c.id, day:t.day, action:b.operation, actor:'parent', at:t.reviewedAt });
+    }
+  } else if (action === 'move-activity') {
+    requireParent();
+    if (!['up', 'down'].includes(b.direction)) fail('排序方向无效');
+    const indexes = s.activities.map((a, i) => a.child === c.id && !a.deletedAt ? i : -1).filter(i => i >= 0);
+    const current = indexes.findIndex(i => s.activities[i].id === b.id);
+    if (current < 0) fail('活动不存在');
+    const next = current + (b.direction === 'up' ? -1 : 1);
+    if (next >= 0 && next < indexes.length) {
+      const a = indexes[current], b = indexes[next];
+      [s.activities[a], s.activities[b]] = [s.activities[b], s.activities[a]];
     }
   } else if (action === 'delete-activity') {
     requireParent();
@@ -217,7 +229,7 @@ const server = http.createServer(async (req, res) => {
       const credential = authenticateAI(s, req);
       if (credential.scope !== 'manage') fail('此令牌只有读取权限', 403);
       const aiAction = url.pathname.slice('/api/ai/v1/'.length);
-      if (!['wish', 'edit-wish', 'withdraw-wish', 'review-wish', 'activity', 'edit-activity', 'delete-activity', 'delete-reward', 'toggle', 'complete', 'task', 'goal', 'bonus', 'reward', 'redeem', 'redemption'].includes(aiAction)) fail('接口不存在', 404);
+      if (!['wish', 'edit-wish', 'withdraw-wish', 'review-wish', 'activity', 'edit-activity', 'move-activity', 'delete-activity', 'delete-reward', 'toggle', 'complete', 'task', 'goal', 'bonus', 'reward', 'redeem', 'redemption'].includes(aiAction)) fail('接口不存在', 404);
       const requestId = text(req.headers['idempotency-key'], 100);
       s.aiRequests ||= [];
       const fingerprint = digest(JSON.stringify([aiAction, b]));

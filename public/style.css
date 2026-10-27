@@ -14,3 +14,4 @@ textarea{display:block;width:100%;min-height:85px;margin-top:8px;padding:12px;bo
 /* Prevent iOS input-focus zoom while preserving pinch-to-zoom accessibility. */
 @media(max-width:1024px),(pointer:coarse){input:not([type=checkbox]):not([type=radio]),select,textarea,label>select,.header-actions select{font-size:16px}}
 
+.activity-sort{display:flex;gap:6px;flex:0 0 auto!important;min-width:0!important}.activity-sort button{font-size:11px;padding:9px 10px}@media(max-width:760px){.activity-record>div:not(.activity-sort){flex-basis:calc(100% - 50px)}.activity-sort{margin-left:40px}.activity-record{gap:8px}.activity-sort button{min-height:44px}}

@@ -161,6 +161,11 @@ test('审核、重复打卡、兑换冻结和权限', async () => {
     assert.equal((await fetch('http://127.0.0.1:3127/2')).status, 200);
     const manifest = await (await fetch('http://127.0.0.1:3127/manifest.webmanifest?slot=2')).json();
     assert.equal(manifest.start_url, '/2');
+    assert.equal((await api('adventure-settings', {segments:[500,1000,1500,2000,3000]}, false)).status,403);
+    assert.equal((await api('adventure-settings', {segments:[0,1,2,3,4]})).status,400);
+    assert.equal((await api('adventure-settings', {segments:[600,1200,1800,2400,3000]})).status,200);
+    assert.equal((await api('state')).data.adventure.scenes[1].threshold,600);
+    assert.equal((await api('state?slot=2')).data.adventure.scenes[1].threshold,500);
     const newActivity = { title:'排序活动一', icon:'📖', points:10, days:[0,1,2,3,4,5,6], period:'晚上', review:true };
     await api('activity', newActivity);
     await api('activity', { ...newActivity, title:'排序活动二' });

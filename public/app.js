@@ -2,6 +2,7 @@ const app = document.querySelector('#app');
 const modal = document.querySelector('#modal');
 let childSlot = location.pathname.match(/^\/([1-9]\d*)$/)?.[1] || '';
 if (childSlot) document.querySelector('link[rel="manifest"]').href = '/manifest.webmanifest?slot=' + childSlot;
+let growthTab = 'map';
 let state, page = 'today', child = localStorage.getItem('child') || '', busy = false, managementTab = 'review', historyDay = '', historyData = null;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const renderIcon = icon => String(icon).replaceAll('\uFE0F', '') === '🪥' ? '<img src="/toothbrush.svg" alt="牙刷" style="width:1.25em;height:1.25em;vertical-align:middle">' : esc(icon);
@@ -43,7 +44,7 @@ function render() {
 }
 function today(done) {
   const ratio = Math.min(100, Math.round(state.weekPoints / state.goal * 100));
-  return `<div class="overview"><section class="hero"><div><span class="pill">✦ 这一周的成长约定</span><h2>每一分努力，<br>都在悄悄发芽。</h2><p>本周已经收获 <b>${state.weekPoints}</b> 分，${state.weekPoints >= state.goal ? '目标达成，真棒！' : `距离目标还差 ${state.goal - state.weekPoints} 分。`}</p><div class="progress"><span style="width:${ratio}%"></span></div><div class="progress-label"><span>本周积分目标</span><b>${state.weekPoints} / ${state.goal}</b></div></div><div class="tree-art"><div class="sun"></div><div class="crown c1"></div><div class="crown c2"></div><div class="crown c3"></div><div class="trunk"></div><div class="ground"></div><span class="leaf l1">✦</span><span class="leaf l2">✧</span></div></section><section class="wallet"><span class="wallet-icon">✷</span><p>我的积分小金库</p><strong>${state.balance - state.frozen}<small> 分</small></strong><span>累计收获 ${state.earned} 分${state.frozen ? ` · 待审批冻结 ${state.frozen} 分` : ''}</span><button data-page="wishes">看看我的心愿 <span>↗</span></button></section></div>
+  return `${adventureCard()}<div class="overview"><section class="hero"><div><span class="pill">✦ 这一周的成长约定</span><h2>每一分努力，<br>都在悄悄发芽。</h2><p>本周已经收获 <b>${state.weekPoints}</b> 分，${state.weekPoints >= state.goal ? '目标达成，真棒！' : `距离目标还差 ${state.goal - state.weekPoints} 分。`}</p><div class="progress"><span style="width:${ratio}%"></span></div><div class="progress-label"><span>本周积分目标</span><b>${state.weekPoints} / ${state.goal}</b></div></div><div class="tree-art"><div class="sun"></div><div class="crown c1"></div><div class="crown c2"></div><div class="crown c3"></div><div class="trunk"></div><div class="ground"></div><span class="leaf l1">✦</span><span class="leaf l2">✧</span></div></section><section class="wallet"><span class="wallet-icon">✷</span><p>我的积分小金库</p><strong>${state.balance - state.frozen}<small> 分</small></strong><span>累计收获 ${state.earned} 分${state.frozen ? ` · 待审批冻结 ${state.frozen} 分` : ''}</span><button data-page="wishes">看看我的心愿 <span>↗</span></button></section></div>
   <div class="section-title"><div><h2>今天的小任务 <span>${done}/${state.tasks.length}</span></h2><p>按照自己的节奏，一件一件完成吧</p></div></div>
   ${state.tasks.length ? ['早晨', '放学后', '晚上', '自由时间'].map(period => { const list = state.tasks.filter(t => t.period === period); return list.length ? `<section class="task-group"><h3>${{ 早晨: '☀', 放学后: '☁', 晚上: '☾', 自由时间: '✧' }[period]} ${period}</h3><div class="task-grid">${list.map(taskCard).join('')}</div></section>` : ''; }).join('') : `<div class="empty"><span>🌱</span><h3>从一个小习惯开始</h3><p>今天还没有安排，和家长一起约定一个小习惯吧。</p></div>`}`;
 }
@@ -55,7 +56,7 @@ function taskCard(t) {
 }
 function wishes() { return `<div class="balance-banner"><span>✷ 可用积分 <b>${state.balance - state.frozen}</b></span><small>兑换不会减少累计收获和本周进度</small></div><div class="section-title"><div><h2>我的小小心愿</h2><p>自己许愿，和家长一起约定需要的积分</p></div><button class="primary" data-action="wish">＋ 许个心愿</button></div>${wishList(false)}<div class="section-title"><h2>可以兑换的奖励</h2></div><div class="reward-grid">${!state.rewards.length ? '<div class="empty reward-empty"><span>🎁</span><h3>写下你的第一个心愿</h3><p>想去哪里，想做什么？让家长听听你的期待。</p></div>' : ''}${state.rewards.map(r => `<article class="reward"><div class="reward-icon">${renderIcon(r.icon)}</div><h2>${esc(r.title)}</h2><p>${r.cost} 分的美好期待</p><button class="${state.balance - state.frozen >= r.cost ? 'primary' : 'outline'}" data-action="redeem" data-id="${r.id}" ${state.balance - state.frozen < r.cost ? 'disabled' : ''}>${state.balance - state.frozen >= r.cost ? '申请兑换 →' : `还差 ${r.cost - state.balance + state.frozen} 分`}</button></article>`).join('')}</div><div class="section-title"><h2>我的兑换记录</h2></div>${redemptions(false)}`; }
 function redemptions(parent) { const names = { pending: '等待家长批准', approved: '待家长兑现', delivered: '已兑现', rejected: '未通过', cancelled: '已取消' }; return state.redemptions.length ? `<div class="panel">${state.redemptions.slice().reverse().map(r => `<div class="record"><span class="record-icon">${renderIcon(r.icon)}</span><div><b>${esc(r.title)}</b><p>${names[r.status]} · ${r.cost} 分</p></div>${parent && r.status === 'pending' ? `<button data-action="redemption" data-id="${r.id}" data-op="approve">批准</button><button class="subtle" data-action="redemption" data-id="${r.id}" data-op="reject">拒绝</button>` : parent && r.status === 'approved' ? `<button data-action="redemption" data-id="${r.id}" data-op="deliver">标记兑现</button><button class="subtle" data-action="redemption" data-id="${r.id}" data-op="refund">取消退款</button>` : '<span class="record-tail">✦</span>'}</div>`).join('')}</div>` : '<div class="empty compact">还没有兑换记录，期待第一份小惊喜。</div>'; }
-function growth() {
+function pointsHistory() {
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(state.today + 'T12:00:00+08:00'); d.setUTCDate(d.getUTCDate() - 6 + i); const key = d.toISOString().slice(0, 10); return { day: key, points: state.ledger.filter(l => l.day === key && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0) }; });
   const max = Math.max(10, ...days.map(d => d.points));
   return `<div class="stat-grid"><div class="stat"><span>累计收获</span><strong>${state.earned}<small> 分</small></strong></div><div class="stat"><span>本周活动积分</span><strong>${state.weekPoints}<small> 分</small></strong></div><div class="stat"><span>今日完成</span><strong>${state.tasks.filter(t => t.status === 'done').length}<small> / ${state.tasks.length} 项</small></strong></div></div><section class="panel chart"><h2>最近七天的小进步</h2><div class="bars">${days.map(d => `<div class="bar-col"><b>${d.points}</b><div class="bar-track"><div style="height:${Math.max(3, d.points / max * 100)}%"></div></div><span>${d.day.slice(5).replace('-', '/')}</span></div>`).join('')}</div></section><div class="section-title"><h2>积分足迹</h2></div>${state.ledger.length ? `<div class="panel">${state.ledger.map(l => `<div class="record"><span class="record-icon">${l.amount >= 0 ? '✦' : '↗'}</span><div><b>${esc(l.reason)}</b><p>${l.day} · ${new Date(l.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</p></div><strong class="record-tail ${l.amount >= 0 ? 'positive' : ''}">${l.amount > 0 ? '+' : ''}${l.amount}</strong></div>`).join('')}</div>` : '<div class="empty compact">完成第一项活动，留下你的成长足迹。</div>'}`;
@@ -97,6 +98,15 @@ document.addEventListener('click', async e => {
   if (a === 'management-tab') { managementTab = el.dataset.tab; render(); if (managementTab === 'history') await loadHistory(); return; }
   if (a === 'history-query') { historyDay = document.querySelector('#history-day').value; return loadHistory(); }
   if (a === 'history-task') { if (operation !== 'undo' && !confirm('确认修改该日审核状态？')) return; try { await api('task',{id:el.dataset.id,operation}); await refresh(); await loadHistory(); toast(operation === 'undo' ? '已取消完成并扣回积分' : '审核状态已更新'); } catch(error){toast(error.message)} return; }
+  if(a === 'save-adventure') { const segments=[...document.querySelectorAll('.segment-input')].map(input=>Number(input.value)); if(!segments.every(n=>Number.isInteger(n)&&n>=1&&n<=100000))return toast('每段请填写 1～100000 的整数'); try{await api('adventure-settings',{segments,includeBonus:document.querySelector('#adventure-include-bonus').checked}); await refresh(); toast('当前孩子的闯关门槛已保存');}catch(error){toast(error.message)}return; }
+  if(a === 'point-planner'){openPointPlanner();return;}
+  if(a === 'calculate-plan'){await calculatePointPlan();return;}
+  if(a === 'apply-plan'){if(!pointPlanInput)return;try{await api('apply-point-plan',pointPlanInput);modal.close();await refresh();toast('建议积分已应用，已完成记录不变');}catch(error){toast(error.message)}return;}
+  if (a === 'growth-tab') {growthTab=el.dataset.tab;render();return;}
+  if (a === 'explore') {page='growth';growthTab='map';render();window.scrollTo(0,0);return;}
+  if (a === 'scene-preview') {openScene(el.dataset.id);return;}
+  if(a === 'discovery'){openDiscovery(el.dataset.scene,Number(el.dataset.node));return;}
+  if(a === 'select-scene'){try{await api('adventure-scene',{scene:el.dataset.id});modal.close();await refresh();toast('首页场景已更新');}catch(error){toast(error.message)}return;}
   if (a === 'close') return modal.close();
   if (a === 'login') return dialog('进入家长模式', field('家长密码', 'password', '输入初始化时设置的密码', 'password'), 'login', '解锁');
   if (a === 'activity' || a === 'edit-activity') {
@@ -179,7 +189,7 @@ function wishList(parent) {
 
 function manage() {
  if (!state.parent) return profile();
- const tabs = {review:'审核中心',activities:'活动安排',points:'积分与目标',rewards:'心愿与奖励',history:'按日回溯',settings:'家庭与接入'};
+ const tabs = {review:'审核中心',activities:'活动安排',points:'积分与目标',rewards:'心愿与奖励',history:'按日回溯',adventure:'成长探险',settings:'家庭与接入'};
  const template = document.createElement('template'); template.innerHTML = legacyManage();
  const panelFor = name => { const heading = [...template.content.querySelectorAll('.section-title')].find(el => el.textContent.includes(name)); return heading?.nextElementSibling?.outerHTML || ''; };
  const action = (name,label) => '<button class="outline" data-action="'+name+'">'+label+'</button>';
@@ -189,6 +199,7 @@ function manage() {
  if(managementTab === 'points') body = '<section class="panel settings-panel"><h2>积分与目标</h2><p>可用 '+(state.balance-state.frozen)+' 分 · 本周 '+state.weekPoints+' / '+state.goal+' 分。扣分须填写原因，不能超过可用余额，不减少累计获得和本周任务积分。</p><div class="management-actions">'+action('goal','设置周目标')+action('bonus','鼓励加分')+action('deduct','记录扣分')+'</div></section>';
  if(managementTab === 'rewards') body = '<div class="management-actions">'+action('reward','＋ 添加奖励')+'</div><div class="section-title"><h2>心愿审批</h2></div>'+wishList(true)+'<div class="section-title"><h2>奖励管理</h2></div>'+panelFor('奖励管理')+'<div class="section-title"><h2>兑换与兑现</h2></div>'+redemptions(true);
  if(managementTab === 'history') body = '<section class="panel settings-panel"><h2>按日期回查</h2><p>查询该日已经生成的任务和审核记录；没有记录的日期不会补造任务。撤销按任务原日期冲回积分。</p><div class="management-actions"><input id="history-day" type="date" max="'+state.today+'" value="'+(historyDay||state.today)+'"><button data-action="history-query">查询</button></div></section><div id="history-result">请选择日期并查询</div>';
+ if(managementTab === 'adventure') body = adventureSettings();
  if(managementTab === 'settings') body = '<section class="panel settings-panel"><h2>家庭与接入</h2><p>管理家庭成员、AI 授权和数据导出。</p><div class="management-actions">'+action('edit-family','修改家庭名称')+action('child','添加孩子')+action('ai-tokens','AI 接入令牌')+action('logout','退出家长控制')+'<a class="button outline" href="/api/export" download>导出数据</a></div></section><div class="section-title"><h2>孩子与专属入口</h2></div><div class="panel">'+state.children.map((c,i)=>'<div class="record"><div><b>'+esc(c.name)+'</b><p><a href="/'+(i+1)+'">'+esc(location.origin)+'/'+(i+1)+'</a></p></div><button class="outline" data-action="edit-child" data-id="'+c.id+'">修改姓名</button></div>').join('')+'</div>'; 
  return '<div class="section-title"><div><h2>家长控制</h2><p>管理完成后，可退出并交回孩子使用</p></div><button class="outline" data-action="logout">退出家长控制</button></div><div class="management-tabs">'+Object.entries(tabs).map(([key,label])=>'<button class="'+(key===managementTab?'primary':'outline')+'" data-action="management-tab" data-tab="'+key+'">'+label+'</button>').join('')+'</div>'+body;
 }
@@ -202,5 +213,87 @@ async function loadHistory() {
  const status={todo:'未完成',pending:'待审核',done:'已完成'};
  const operations={submit:'提交完成',complete:'确认完成',withdraw:'撤回',approve:'审核通过',reject:'退回',undo:'撤销完成'};
  target.innerHTML='<div class="section-title"><h2>'+esc(result.day)+' · '+result.tasks.filter(t=>t.status==='done').length+' / '+result.tasks.length+' 项完成</h2></div><div class="panel">'+(result.tasks.map(t=>'<div class="record"><span class="record-icon">'+renderIcon(t.icon)+'</span><div><b>'+esc(t.title)+'</b><p>'+status[t.status]+' · '+t.points+' 分'+(t.reviewedBy==='auto'?' · 自动审核':'')+'</p></div>'+(t.status==='done'?'<button class="subtle danger" data-action="history-task" data-id="'+t.id+'" data-op="undo">撤销完成</button>':t.status==='pending'?'<button data-action="history-task" data-id="'+t.id+'" data-op="approve">通过</button><button class="subtle" data-action="history-task" data-id="'+t.id+'" data-op="reject">退回</button>':'')+'</div>').join('')||'<p class="panel-empty">该日没有已记录的任务</p>')+'</div><div class="section-title"><h2>审核轨迹</h2></div><div class="panel">'+(result.events.map(e=>'<div class="record"><div><b>'+esc(result.tasks.find(t=>t.id===e.task)?.title||'历史任务')+' · '+(operations[e.action]||esc(e.action))+'</b><p>'+({auto:'午夜自动审核',parent:'家长',child:'孩子'}[e.actor]||esc(e.actor))+' · '+esc(new Date(e.at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}))+'</p></div></div>').join('')||'<p class="panel-empty">暂无审核轨迹（旧版记录可能只有积分流水）</p>')+'</div>';
+ }catch(error){toast(error.message)}
+}
+
+function sceneArt(id) {
+ const palettes={camp:['#e5efcf','#a8c18b','#6f995e'],forest:['#cee5d0','#7daa7c','#35664e'],ocean:['#d0edf0','#74c6cf','#368eaa'],desert:['#f5e2b8','#dfb66d','#bc8c4e'],snow:['#e0eff5','#b5d4df','#739fae'],sky:['#243f5b','#567792','#93b0b8']};
+ const [sky,land,deep]=palettes[id];
+ const trees='<path d="M88 176v-54m-30 15 30-58 31 58Z" fill="'+deep+'" stroke="'+deep+'" stroke-width="5"/><path d="M353 180v-60m-32 16 32-66 33 66Z" fill="'+deep+'" stroke="'+deep+'" stroke-width="5"/>';
+ const objects={camp:trees+'<path d="m164 185 57-77 57 77Z" fill="#f5d68d"/><path d="m221 108 12 77h-30Z" fill="#ae8156"/>',forest:trees+'<circle cx="214" cy="92" r="50" fill="#54875d"/><path d="M211 181v-73" stroke="#95744f" stroke-width="13"/><rect x="184" y="111" width="59" height="38" rx="5" fill="#d2ae79"/><path d="m177 111 36-27 36 27" fill="#715b40"/>',ocean:'<path d="M0 163q40-15 80 0t80 0t80 0t80 0t80 0t80 0" fill="none" stroke="#c5edf0" stroke-width="6"/><path d="m185 158 23 25h69l23-25Z" fill="#a17751"/><path d="M240 155V72l-45 77Z" fill="#fff8e4"/><path d="m246 85 36 64h-36Z" fill="#e5b96a"/>',desert:'<path d="M105 185v-65m0 35H86v-23m19 10h21v-31" stroke="#688c65" stroke-width="12" fill="none" stroke-linecap="round"/><ellipse cx="290" cy="182" rx="49" ry="10" fill="#75b7ae"/><path d="m319 173-6-71m0 5q-26-25-46 1m46-1q22-28 43-3m-43 3q-6-32-25-32" stroke="#6d8b56" stroke-width="8" fill="none" stroke-linecap="round"/>',snow:'<path d="m85 178 94-130 91 130m-4 0 72-105 77 105" fill="'+deep+'"/><path d="m150 89 29-41 30 43-20-8-12 14-12-13Z" fill="#fffdf3"/><path d="M296 177v-56l29 12-29 10" fill="#d8aa60" stroke="#bd8e50" stroke-width="3"/>',sky:'<path d="m139 144 90 12 75-17-72 61Z" fill="#6f9691"/><ellipse cx="223" cy="142" rx="81" ry="17" fill="#afc49b"/><path d="m215 136 4-63h18l4 63Z" fill="#f5e4b1"/><path d="m213 73 15-18 15 18Z" fill="#dfb265"/><path d="M86 63v18m-9-9h18m262 30v16m-8-8h16" stroke="#f6dd92" stroke-width="3" stroke-linecap="round"/>'};
+ return '<svg class="scene-art" viewBox="0 0 440 220" role="img" aria-label="场景插画"><rect width="440" height="220" fill="'+sky+'"/><circle cx="350" cy="48" r="24" fill="#f6dc96"/><path d="M0 159Q100 104 220 153T440 137V220H0Z" fill="'+land+'"/><path d="M0 192Q120 156 253 183T440 171V220H0Z" fill="'+deep+'" opacity=".25"/>'+objects[id]+'</svg>';
+}
+function adventureCard(){
+ const a=state.adventure;if(!a)return '';
+ const scene=a.scenes.find(s=>s.id===a.selected),next=a.scenes.find(s=>s.id===a.next),reached=a.scenes.find(s=>s.id===a.reached);
+ const progress=next?Math.max(0,Math.min(100,(a.points-reached.threshold)/(next.threshold-reached.threshold)*100)):100;
+ return '<section class="adventure-hero '+scene.id+'"><div class="adventure-copy"><p class="eyebrow">成长探险 · 第 '+(a.scenes.findIndex(s=>s.id===a.reached)+1)+' 站</p><h2>'+scene.name+'</h2><p>'+scene.description+'</p><div class="adventure-metrics"><b>'+a.points+'</b><span>成长值（'+(a.includeBonus?'含家长加分':'活动得分')+'） · '+(next?'前往'+next.name+'，还差 '+Math.max(0,next.threshold-a.points):'整张地图已点亮！')+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div><button class="adventure-link" data-action="explore">展开我的探险地图 ↗</button></div><div class="adventure-picture">'+sceneArt(scene.id)+'</div></section>';
+}
+function growth(){
+ const tabs='<div class="growth-tabs"><button class="'+(growthTab==='map'?'primary':'outline')+'" data-action="growth-tab" data-tab="map">探险地图</button><button class="'+(growthTab==='points'?'primary':'outline')+'" data-action="growth-tab" data-tab="points">积分足迹</button></div>';
+ if(growthTab==='points')return tabs+pointsHistory();
+ const a=state.adventure;if(!a)return tabs;
+ return tabs+adventureCard()+'<div class="section-title"><div><h2>下一片风景，等你发现</h2><p>完成任务积累成长值，兑换心愿不会让旅程后退</p></div><span class="pill">已到达 '+a.scenes.filter(s=>s.unlockedAt).length+' / 6 站</span></div><div class="adventure-map">'+a.scenes.map((s,i)=>'<button class="scene-card '+(!s.unlockedAt?'locked':'')+' '+(s.id===a.selected?'selected':'')+'" data-action="scene-preview" data-id="'+s.id+'"><div class="scene-illustration">'+sceneArt(s.id)+'<span class="scene-number">0'+(i+1)+'</span><span class="scene-lock">'+(s.unlockedAt?'已到达':'未解锁')+'</span></div><div class="scene-body"><h3>'+s.name+'</h3><p>'+s.description+'</p><div><b>'+s.threshold+' 成长值</b><span>'+(s.id===a.selected?'当前主题 ✓':s.unlockedAt?'进入看看 →':'还差 '+Math.max(0,s.threshold-a.points))+'</span></div></div></button>').join('')+'</div><div class="section-title"><h2>我的旅行纪念册</h2></div><div class="badge-shelf">'+a.scenes.filter(s=>s.unlockedAt).map(s=>'<div><span>✦</span><b>'+s.badge+'</b><small>'+s.unlockedAt.slice(0,10)+'</small></div>').join('')+'</div>';
+}
+
+function adventureSettings(){
+ const a=state.adventure,c=state.children.find(c=>c.id===child);
+ let total=0;
+ return '<section class="panel settings-panel"><div class="section-title"><h2>'+esc(c.name)+'的成长探险</h2><button class="outline" data-action="point-planner">自动核算任务积分</button></div><h2>路段门槛</h2><p>只调整当前孩子。填写每一段所需成长值，系统自动累加为解锁门槛。兑换与行为扣分不影响成长值；家长加分可选择是否计入。</p><p>当前成长值 <b>'+a.points+'</b> · 已解锁 '+a.scenes.filter(s=>s.unlockedAt).length+' / 6 站</p><label class="checkbox-label" style="margin-top:20px"><input type="checkbox" id="adventure-include-bonus" '+(a.includeBonus?'checked':'')+'>家长加分计入成长值（包含历史加分）</label><p class="muted">补录历史积分可开启；关闭只统计已确认活动积分。已解锁场景不会收回。</p><div class="segment-list">'+a.segments.map((value,i)=>{total+=value;return '<label class="segment-row"><span>'+a.scenes[i].name+' → '+a.scenes[i+1].name+'</span><input class="segment-input" aria-label="'+a.scenes[i].name+'到'+a.scenes[i+1].name+'所需成长值" type="number" min="1" max="100000" step="1" value="'+value+'"><small>累计 <b class="segment-total">'+total+'</b> 解锁</small></label>';}).join('')+'</div><div class="adventure-preview" id="adventure-preview">'+adventurePreview(a.segments)+'</div><p class="muted">提高门槛不会收回已解锁场景；降低门槛后，达到条件的场景将解锁。这里只修改探险节奏，不更改任务积分、周目标和奖励价格。</p><button class="primary" data-action="save-adventure">保存当前孩子的配置</button></section>';
+}
+function adventurePreview(segments){
+ let total=0; const targets=segments.map(n=>total+=n);
+ const includes=document.querySelector('#adventure-include-bonus')?.checked ?? state.adventure.includeBonus;
+ const points=Math.max(0,state.ledger.filter(l=>(includes?['task','reverse','bonus']:['task','reverse']).includes(l.kind)).reduce((n,l)=>n+l.amount,0));
+ const newly=state.adventure.scenes.slice(1).filter((scene,i)=>!scene.unlockedAt && points>=targets[i]);
+ return '按当前选择成长值为 <b>'+points+'</b>。整张地图共需 <b>'+total+'</b> 成长值。'+(newly.length?'保存后将新解锁：'+newly.map(s=>esc(s.name)).join('、'):'本次调整不会新增已解锁场景。');
+}
+function updateAdventurePreview(){
+ let total=0;const inputs=[...document.querySelectorAll('.segment-input')];const segments=inputs.map(input=>Number(input.value));
+ document.querySelectorAll('.segment-total').forEach((el,i)=>{total+=segments[i];el.textContent=Number.isFinite(total)?total:'—';});
+ document.querySelector('#adventure-preview').innerHTML=segments.every(n=>Number.isInteger(n)&&n>=1&&n<=100000)?adventurePreview(segments):'请填写每段所需成长值（1～100000 的整数）';
+}
+document.addEventListener('input',event=>{if(event.target.matches('.segment-input, #adventure-include-bonus'))updateAdventurePreview();});
+
+function openScene(id){
+ const a=state.adventure,scene=a.scenes.find(s=>s.id===id),route=a.routes.find(r=>r.scene===id),index=a.scenes.findIndex(s=>s.id===id),next=a.scenes[index+1];
+ const pct=Math.floor(route.progress*100),remaining=Math.max(0,route.end-a.points);
+ const fractions=pct===75?'四分之一路程':pct>75?'不到四分之一路程':pct===50?'二分之一路程':pct>50?'不到二分之一路程':pct===25?'四分之三路程':pct>25?'不到四分之三路程':'四分之三以上路程';
+ modal.classList.add('map-dialog');
+ const coords=[[12,83],[35,66],[69,50],[41,30],[82,14]];
+ const progressPath='M 72 415 L 155 415 L 155 330 L 310 330 L 310 250 L 445 250 L 445 150 L 246 150 L 246 70 L 492 70';
+ modal.innerHTML='<div class="dialog-heading"><div><p class="eyebrow">探索手册 · 第 '+(index+1)+' 站</p><h2>'+scene.name+'</h2></div><button class="close" data-action="close">×</button></div><p class="map-description">'+scene.description+'</p><div class="route-summary"><b>'+pct+'% 已探索</b><span>'+(next?'距离'+next.name+'还差 '+remaining+' 成长值':'星岛探索，还差 '+remaining+' 成长值完成')+'</span><small>'+(pct===100?'这段旅程已完成，随时回来看看。':'还剩'+fractions+'，每一个好习惯都在带你前进。')+'</small></div><div class="maze-board '+scene.id+'"><div class="maze-landscape">'+sceneArt(id)+'</div><svg class="maze-path" viewBox="0 0 600 500" preserveAspectRatio="none" aria-hidden="true"><path d="M72 415V455H230V380H390V430H530V330H550V190H490M155 330H80V230H180V170H100V80H170M445 250H520V140H560M246 150V210H330" fill="none" stroke="#789572" stroke-width="13" opacity=".22" stroke-linecap="round" stroke-linejoin="round"/><path d="'+progressPath+'" fill="none" stroke="#fffdf3" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/><path d="'+progressPath+'" fill="none" stroke="#7f9d62" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" pathLength="100" stroke-dasharray="'+pct+' 100"/></svg>'+coords.map(([x,y],i)=>{
+ const node=route.nodes[i-1],earned=i===0?!!scene.unlockedAt:i===4?!!next?.unlockedAt||route.progress===1:!!node.earnedAt;
+ const icon=i===0?'⚑':i===4?'✦':node.icon;
+ return '<button class="maze-node '+(earned?'earned':'waiting')+'" style="left:'+x+'%;top:'+y+'%" '+(i>0&&i<4?'data-action="discovery" data-scene="'+id+'" data-node="'+(i-1)+'"':'disabled')+' aria-label="'+(node?esc(node.name):i===0?'起点':'终点')+'"><span>'+icon+'</span><small>'+(i===0?'出发':i===4?'100% · 下一站':node.percent+'% · '+(earned?'已获得':'待发现'))+'</small></button>';
+ }).join('')+'<div class="maze-note">虚线岔路是观察区，亮色路线是你的成长旅程</div></div><div class="section-title"><h2>本场景的探险收获</h2></div><div class="discovery-list">'+route.nodes.map((n,i)=>'<button class="discovery-row '+(n.earnedAt?'earned':'')+'" data-action="discovery" data-scene="'+id+'" data-node="'+i+'"><span>'+n.icon+'</span><div><b>'+n.name+'</b><small>'+n.percent+'% 节点 · '+(n.earnedAt?'已收入探险背包':'累计 '+n.required+' 成长值解锁')+'</small></div><strong>'+(n.earnedAt?'查看':'还差 '+Math.max(0,n.required-a.points))+'</strong></button>').join('')+'</div><p class="muted">道具和伙伴是虚拟收藏，不扣兑换积分。现实中的户外活动要有家长陪伴。</p>'+(scene.unlockedAt?'<button class="primary" data-action="select-scene" data-id="'+id+'">设为首页场景</button>':'<p class="muted">此场景尚未解锁，可以先预览路线。</p>');
+ if(!modal.open)modal.showModal();
+}
+function openDiscovery(id,index){
+ const node=state.adventure.routes.find(r=>r.scene===id).nodes[index];
+ const scene=state.adventure.scenes.find(s=>s.id===id);
+ modal.innerHTML='<div class="dialog-heading"><h2>'+esc(node.name)+'</h2><button class="close" data-action="close">×</button></div><div class="discovery-detail"><span>'+node.icon+'</span><p class="pill">'+(node.earnedAt?'已获得 · '+node.earnedAt.slice(0,10):'探索到 '+node.percent+'% 时获得')+'</p><h3>'+(node.earnedAt?'你又收获了一份成长礼物':'下一份发现正在等你')+'</h3><p>'+esc(node.lesson)+'</p><p class="muted">'+(node.earnedAt?'这份礼物会一直保存在你的旅行背包中。':'在'+scene.name+'继续前进，还差 '+Math.max(0,node.required-state.adventure.points)+' 成长值。')+'</p><button class="outline" data-action="scene-preview" data-id="'+id+'">返回场景路线</button></div>';
+}
+modal.addEventListener('close',()=>modal.classList.remove('map-dialog'));
+
+let pointPlanInput=null;
+function openPointPlanner(){
+ pointPlanInput=null;
+ const activities=state.activities.filter(a=>a.active);
+ modal.innerHTML='<div class="dialog-heading"><h2>积分节奏规划师</h2><button class="close" data-action="close">×</button></div><p class="muted">从今天开始，规划走完剩余地图的日历天数。按重复星期精确计算活动次数，再按预计完成率与任务权重分配积分。</p><div class="form-row">'+field('预计多少天走完剩余地图','plan-days','','number',90)+field('预计完成率 %','plan-rate','','number',80)+'</div><p class="muted">分类只是建议权重，可逐项修改；条件性任务建议降低权重。周末任务只计入安排的星期，家长临时加分不纳入未来预测。</p><div class="planner-tasks">'+activities.map(a=>{
+ const weight=/阅读|读书|运动|搏击|作业|预习|复习/.test(a.title)?2:1;
+ return '<label class="planner-row"><span>'+esc(a.title)+'<small>每周 '+a.days.length+' 次 · 现 '+a.points+' 分</small></span><select data-plan-weight="'+a.id+'" aria-label="'+esc(a.title)+'任务权重">'+[[1,'基础习惯 ×1'],[1.5,'中等投入 ×1.5'],[2,'专注练习 ×2'],[3,'较大挑战 ×3']].map(([v,l])=>'<option value="'+v+'" '+(v===weight?'selected':'')+'>'+l+'</option>').join('')+'</select></label>';
+ }).join('')+'</div><button class="primary" data-action="calculate-plan">计算建议方案</button><div id="point-plan-result"></div>';
+ modal.classList.add('map-dialog');modal.showModal();
+ const invalidate=()=>{pointPlanInput=null;document.querySelector('#point-plan-result').innerHTML='';};
+ modal.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',invalidate));
+}
+async function calculatePointPlan(){
+ const days=Number(modal.querySelector('[name="plan-days"]').value),completion=Number(modal.querySelector('[name="plan-rate"]').value)/100;
+ const weights=Object.fromEntries([...modal.querySelectorAll('[data-plan-weight]')].map(el=>[el.dataset.planWeight,Number(el.value)]));
+ try{
+ const result=await api('point-plan',{days,completion,weights});pointPlanInput={days,completion,weights};
+ let running=0;const a=state.adventure;
+ document.querySelector('#point-plan-result').innerHTML='<div class="adventure-preview" style="margin-top:20px">剩余需 <b>'+result.remaining+'</b> 成长值，预计平均每天 <b>'+result.daily+'</b> 分。整数取整后约 <b>'+result.estimatedDays+'</b> 天达到终点。'+(result.constrained?'当前任务数量与整数积分限制导致偏差较大，建议调整天数或活动安排。':'')+'</div><div class="section-title"><h2>每项建议积分</h2></div><div class="panel">'+result.rows.map(r=>'<div class="record"><div><b>'+esc(r.title)+'</b><p>计划内 '+r.count+' 次 · 权重 '+r.weight+'</p></div><span>'+r.current+' → <b>'+r.suggested+' 分</b></span></div>').join('')+'</div><div class="section-title"><h2>预计到达时间</h2></div><div class="panel">'+a.scenes.slice(1).map(scene=>'<div class="record"><div><b>'+scene.name+'</b></div><span>'+(scene.unlockedAt?'已解锁':Math.ceil(Math.max(0,scene.threshold-a.points)/result.daily)+' 天左右')+'</span></div>').join('')+'</div><p class="muted">这是基于预计完成率的规划，不是达成保证。应用后更新活动及今天未完成任务的积分，待审核和已完成快照不变。地图门槛、奖励价格、周目标均不变。修改门槛后请重新计算。</p><button class="primary" data-action="apply-plan">确认应用建议积分</button>';
  }catch(error){toast(error.message)}
 }

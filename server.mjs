@@ -5,6 +5,8 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { approveOverdue } from './automation.mjs';
+import { adventure } from './adventure.mjs';
+import { planPoints } from './planner.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 mkdirSync(path.join(root, 'data'), { recursive: true });
@@ -46,13 +48,36 @@ function view(s, child) {
   start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
   const week = start.toISOString().slice(0, 10);
   const ledger = s.ledger.filter(l => l.child === child);
-  return { family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child && !a.deletedAt), wishes: (s.wishes || []).filter(w => w.child === child), rewards: s.rewards.filter(r => !r.deletedAt && (!r.child || r.child === child)), redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
+  return { adventure: adventure(s, child), family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child && !a.deletedAt), wishes: (s.wishes || []).filter(w => w.child === child), rewards: s.rewards.filter(r => !r.deletedAt && (!r.child || r.child === child)), redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
 }
 function mutate(s, action, b, parent) {
   const c = s.children.find(c => c.id === b.child) || fail('孩子不存在');
   const requireParent = () => { if (!parent) fail('请先解锁家长模式', 403); };
   s.wishes ||= [];
-  if (action === 'auto-approve') {
+  if (action === 'apply-point-plan') {
+    requireParent();
+    const progress = adventure(s, c.id);
+    let result;
+    try { result = planPoints({activities:s.activities.filter(a=>a.child===c.id),start:date(),days:b.days,completion:b.completion,remaining:progress.scenes.at(-1).threshold-progress.points,weights:b.weights}); }
+    catch(error) { fail(error.message); }
+    for (const row of result.rows) {
+      const a = s.activities.find(a=>a.id===row.id); a.points=row.suggested;
+      for (const t of s.tasks.filter(t=>t.activity===a.id && t.day===date() && t.status==='todo')) t.points=row.suggested;
+    }
+    s.pointPlans ||= []; s.pointPlans.push({child:c.id,at:new Date().toISOString(),...result});
+  } else if (action === 'adventure-settings') {
+    requireParent();
+    if (!Array.isArray(b.segments) || b.segments.length !== 5 || !b.segments.every(v => Number.isInteger(v) && v >= 1 && v <= 100000)) fail('每段需填写 1～100000 的整数，共五段');
+    adventure(s, c.id);
+    if (b.includeBonus !== undefined && typeof b.includeBonus !== 'boolean') fail('计分开关无效');
+    s.adventures[c.id].segments = [...b.segments];
+    if (b.includeBonus !== undefined) s.adventures[c.id].includeBonus = b.includeBonus;
+    s.adventures[c.id].updatedAt = new Date().toISOString();
+  } else if (action === 'adventure-scene') {
+    const progress = adventure(s, c.id);
+    if (!progress.scenes.some(scene => scene.id === b.scene && scene.unlockedAt)) fail('该场景尚未解锁');
+    s.adventures[c.id].selected = b.scene;
+  } else if (action === 'auto-approve') {
     requireParent();
     if (typeof b.enabled !== 'boolean') fail('开关值无效');
     s.settings ||= {};
@@ -223,6 +248,13 @@ const server = http.createServer(async (req, res) => {
     let b; try { b = JSON.parse(raw || '{}'); } catch { fail('请求格式不正确'); }
     s = load();
     const action = url.pathname.slice(5);
+    if (action === 'point-plan') {
+      if (!parent) fail('请先解锁家长模式',403);
+      if (!s.children.some(c=>c.id===b.child)) fail('孩子不存在');
+      const progress = adventure(s,b.child);
+      try { return send(200,planPoints({activities:s.activities.filter(a=>a.child===b.child),start:date(),days:b.days,completion:b.completion,remaining:progress.scenes.at(-1).threshold-progress.points,weights:b.weights})); }
+      catch(error) { fail(error.message); }
+    }
     if (action === 'parent-session') { if (!parent) fail('请先解锁家长模式', 403); return send(200, { ok: true }); }
     if (aiRoute) {
       if (!s) fail('请先初始化', 401);
@@ -235,7 +267,7 @@ const server = http.createServer(async (req, res) => {
       const fingerprint = digest(JSON.stringify([aiAction, b]));
       const previous = s.aiRequests.find(r => r.token === credential.id && r.key === requestId);
       if (previous) { if (previous.fingerprint !== fingerprint) fail('同一 Idempotency-Key 不能用于不同请求', 409); return send(200, { ok: true, replayed: true }); }
-      mutate(s, aiAction, b, true);
+      mutate(s, aiAction, b, true); for (const c of s.children) adventure(s,c.id);
       credential.lastUsedAt = new Date().toISOString();
       s.aiRequests.push({ token: credential.id, key: requestId, fingerprint, action: aiAction, child: b.child, at: credential.lastUsedAt });
       save(s); return send(200, { ok: true });
@@ -270,13 +302,13 @@ const server = http.createServer(async (req, res) => {
       if (typeof b.password !== 'string' || b.password.length > 128 || !timingSafeEqual(scryptSync(b.password, s.salt, 64), Buffer.from(s.password, 'hex'))) fail('家长密码不正确', 403);
       attempts.delete(key); const token = uid(); sessions.set(token, Date.now() + 30 * 60000); return send(200, { ok: true }, { 'Set-Cookie': `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=1800` });
     } else if (action === 'logout') { sessions.delete(token); return send(200, { ok: true }, { 'Set-Cookie': 'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' }); }
-    else { if (!s) fail('请先初始化'); mutate(s, action, b, parent); save(s); }
+    else { if (!s) fail('请先初始化'); mutate(s, action, b, parent); for (const c of s.children) adventure(s,c.id); save(s); }
     send(200, { ok: true });
   } catch (error) { console.error(error.message); send(error.status || 500, { error: error.status ? error.message : '服务暂时出错，请重试' }); }
 });
 const attempts = new Map();
 function runAutoApproval() {
-  try { const state = load(); if (state && approveOverdue(state, date())) save(state); }
+  try { const state = load(); if (state && approveOverdue(state, date())) { for(const c of state.children) adventure(state,c.id); save(state); } }
   catch (error) { console.error('自动审核失败：', error.message); }
 }
 runAutoApproval();

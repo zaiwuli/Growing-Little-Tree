@@ -181,5 +181,25 @@ test('审核、重复打卡、兑换冻结和权限', async () => {
     await api('move-activity', { id:last.id, direction:'down' });
     s = (await api('state')).data;
     assert.ok(s.activities.findIndex(a=>a.id===first.id) < s.activities.findIndex(a=>a.id===last.id));
+
+    const requestBalance=(await api('state')).data.balance;
+    await api('point-request',{type:'add',points:20,reason:'主动帮助家人'},false);
+    let requests=(await api('state')).data.pointRequests;
+    const addRequest=requests.at(-1).id;
+    assert.equal((await api('state')).data.balance,requestBalance);
+    assert.equal((await api('review-point-request',{id:addRequest,operation:'approve'},false)).status,403);
+    await api('review-point-request',{id:addRequest,operation:'approve'});
+    await api('review-point-request',{id:addRequest,operation:'approve'});
+    assert.equal((await api('state')).data.balance,requestBalance+20);
+    await api('point-request',{type:'deduct',points:5,reason:'未遵守约定'},false);
+    requests=(await api('state')).data.pointRequests;
+    await api('review-point-request',{id:requests.at(-1).id,operation:'approve'});
+    assert.equal((await api('state')).data.balance,requestBalance+15);
+    const nextPassword='new-test-password-123';
+    assert.equal((await api('change-password',{oldPassword:'incorrect',newPassword:nextPassword,confirmPassword:nextPassword})).status,403);
+    assert.equal((await api('change-password',{oldPassword:'test12345',newPassword:nextPassword,confirmPassword:nextPassword})).status,200);
+    assert.equal((await api('status')).data.parent,false);
+    assert.equal((await api('login',{password:'test12345'})).status,403);
+    assert.equal((await api('login',{password:nextPassword})).status,200);
   } finally { server.kill(); await new Promise(resolve => server.exitCode !== null ? resolve() : server.once('exit', resolve)); rmSync(dir, { recursive: true, force: true }); }
 });

@@ -48,13 +48,30 @@ function view(s, child) {
   start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
   const week = start.toISOString().slice(0, 10);
   const ledger = s.ledger.filter(l => l.child === child);
-  return { adventure: adventure(s, child), family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child && !a.deletedAt), wishes: (s.wishes || []).filter(w => w.child === child), rewards: s.rewards.filter(r => !r.deletedAt && (!r.child || r.child === child)), redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
+  return { pointRequests:(s.pointRequests || []).filter(r=>r.child===child), adventure: adventure(s, child), family: s.family, children: s.children, child, today, tasks: list, activities: s.activities.filter(a => a.child === child && !a.deletedAt), wishes: (s.wishes || []).filter(w => w.child === child), rewards: s.rewards.filter(r => !r.deletedAt && (!r.child || r.child === child)), redemptions: s.redemptions.filter(r => r.child === child), ledger: ledger.slice().reverse(), balance: balance(s, child), frozen: frozen(s, child), earned: ledger.filter(l => ['task', 'reverse', 'bonus'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), weekPoints: ledger.filter(l => l.day >= week && ['task', 'reverse'].includes(l.kind)).reduce((n, l) => n + l.amount, 0), goal: s.children.find(c => c.id === child).goal };
 }
 function mutate(s, action, b, parent) {
   const c = s.children.find(c => c.id === b.child) || fail('孩子不存在');
   const requireParent = () => { if (!parent) fail('请先解锁家长模式', 403); };
   s.wishes ||= [];
-  if (action === 'apply-point-plan') {
+  if (action === 'point-request') {
+    if (!['add','deduct'].includes(b.type)) fail('请选择加分或减分');
+    const points = number(b.points,1,1000), reason = text(b.reason,300);
+    s.pointRequests ||= [];
+    if (s.pointRequests.filter(r=>r.child===c.id && r.status==='pending').length >= 20) fail('待审批申请过多，请先请家长处理');
+    s.pointRequests.push({id:uid(),child:c.id,type:b.type,points,reason,status:'pending',at:new Date().toISOString()});
+  } else if (action === 'review-point-request') {
+    requireParent();
+    const r = (s.pointRequests || []).find(r=>r.id===b.id && r.child===c.id) || fail('申请不存在');
+    if (!['approve','reject'].includes(b.operation)) fail('审批操作无效');
+    if (r.status !== 'pending') return;
+    if (b.operation === 'approve') {
+      if (r.type==='deduct' && balance(s,c.id)-frozen(s,c.id)<r.points) fail('可用积分不足以扣除，请退回或稍后处理');
+      entry(s,c.id,r.type==='add'?r.points:-r.points,(r.type==='add'?'加分申请：':'减分申请：')+r.reason,r.type==='add'?'bonus':'deduct');
+      s.ledger.at(-1).request=r.id;
+    }
+    r.status=b.operation==='approve'?'approved':'rejected'; r.reviewedAt=new Date().toISOString();
+  } else if (action === 'apply-point-plan') {
     requireParent();
     const progress = adventure(s, c.id);
     let result;
@@ -248,6 +265,15 @@ const server = http.createServer(async (req, res) => {
     let b; try { b = JSON.parse(raw || '{}'); } catch { fail('请求格式不正确'); }
     s = load();
     const action = url.pathname.slice(5);
+    if (action === 'change-password') {
+      if (!parent) fail('请先解锁家长模式',403);
+      if (typeof b.oldPassword!=='string' || b.oldPassword.length>128 || !timingSafeEqual(scryptSync(b.oldPassword,s.salt,64),Buffer.from(s.password,'hex'))) fail('原密码不正确',403);
+      const password=text(b.newPassword,128); if(password.length<8) fail('新密码至少 8 位');
+      if(password!==b.confirmPassword) fail('两次输入的新密码不一致');
+      s.salt=randomBytes(16).toString('hex'); s.password=scryptSync(password,s.salt,64).toString('hex'); save(s);
+      sessions.clear();
+      return send(200,{ok:true},{'Set-Cookie':'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});
+    }
     if (action === 'point-plan') {
       if (!parent) fail('请先解锁家长模式',403);
       if (!s.children.some(c=>c.id===b.child)) fail('孩子不存在');
